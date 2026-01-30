@@ -1,0 +1,18 @@
+---
+deployment:
+  targets:
+    passthroughHosts_16370562_1:
+      type: 'web'
+      urls:
+        - 'https://yourdomain.com'
+      path: '/home/username/public_html/naija-sabi-api'
+      restart_mode: 'graceful'
+      pre_deployment_script: |
+        #!/bin/bash
+        cd $DEPLOYMENT_PATH
+        npm install --production
+      post_deployment_script: |
+        #!/bin/bash
+        cd $DEPLOYMENT_PATH
+        npm run build
+        pm2 restart naija-sabi-api
