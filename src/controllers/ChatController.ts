@@ -1,21 +1,12 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { PersonalityService } from '../services/PersonalityService';
 import { logger } from '../utils/logger';
-
-interface ChatMessage {
-  id: string;
-  userId: string;
-  conversationId: string;
-  role: 'user' | 'assistant';
-  content: string;
-  language: string;
-  personality: string;
-  timestamp: string;
-}
+import Conversation from '../models/Conversation';
+import Message from '../models/Message';
 
 export class ChatController {
   private personalityService = new PersonalityService();
-  private conversations: Map<string, ChatMessage[]> = new Map();
   private personalities = ['lagos-hustler', 'yoruba-sage', 'naija-analyst', 'street-oracle'];
 
   /**
@@ -25,7 +16,7 @@ export class ChatController {
   async sendMessage(req: Request, res: Response) {
     try {
       const { message, conversationId, language, personality } = req.body;
-      const userId = (req as any).userId;
+      const userId = (req as any).userId as string;
 
       // Validate input
       if (!message || !conversationId) {
@@ -35,24 +26,34 @@ export class ChatController {
         });
       }
 
-      // Get or create conversation
-      if (!this.conversations.has(conversationId)) {
-        this.conversations.set(conversationId, []);
+      if (!Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid conversationId',
+        });
       }
 
-      const userMessage: ChatMessage = {
-        id: `msg-${Date.now()}`,
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        userId,
+      });
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message: 'Conversation not found',
+        });
+      }
+
+      const userMessageDoc = await Message.create({
         userId,
         conversationId,
         role: 'user',
         content: message,
         language: language || 'pidgin',
         personality: personality || 'lagos-hustler',
-        timestamp: new Date().toISOString(),
-      };
-
-      // Add user message to conversation
-      this.conversations.get(conversationId)!.push(userMessage);
+        timestamp: new Date(),
+      });
 
       // Generate AI response based on personality and language
       let aiResponse = '';
@@ -72,27 +73,42 @@ export class ChatController {
         );
       }
 
-      const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
+      const assistantMessageDoc = await Message.create({
         userId,
         conversationId,
         role: 'assistant',
         content: aiResponse,
         language: language || 'pidgin',
         personality: personality || 'lagos-hustler',
-        timestamp: new Date().toISOString(),
-      };
+        timestamp: new Date(),
+      });
 
-      // Add AI message to conversation
-      this.conversations.get(conversationId)!.push(assistantMessage);
+      const isFirstMessage = conversation.messageCount === 0;
+      if (isFirstMessage) {
+        conversation.title = message.trim().slice(0, 50) || 'New Conversation';
+      }
+
+      conversation.messageCount += 2;
+      conversation.lastMessageAt = assistantMessageDoc.timestamp;
+      await conversation.save();
 
       logger.info(`Message sent by user ${userId} in conversation ${conversationId}`);
 
       res.status(200).json({
         success: true,
         data: {
-          userMessage,
-          assistantMessage,
+          userMessage: {
+            id: userMessageDoc._id.toString(),
+            role: userMessageDoc.role,
+            content: userMessageDoc.content,
+            timestamp: userMessageDoc.timestamp,
+          },
+          assistantMessage: {
+            id: assistantMessageDoc._id.toString(),
+            role: assistantMessageDoc.role,
+            content: assistantMessageDoc.content,
+            timestamp: assistantMessageDoc.timestamp,
+          },
         },
       });
     } catch (error) {
@@ -111,24 +127,44 @@ export class ChatController {
   async getConversation(req: Request, res: Response) {
     try {
       const { conversationId } = req.params;
-      const userId = (req as any).userId;
+      const userId = (req as any).userId as string;
 
-      const messages = this.conversations.get(conversationId) || [];
-
-      // Verify user has access to this conversation
-      const isUserConversation = messages.some((msg) => msg.userId === userId);
-      if (messages.length > 0 && !isUserConversation) {
-        return res.status(403).json({
+      if (!Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({
           success: false,
-          message: 'Access denied',
+          message: 'Invalid conversationId',
         });
       }
+
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        userId,
+      });
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message: 'Conversation not found',
+        });
+      }
+
+      const messages = await Message.find({
+        conversationId,
+        userId,
+      })
+        .sort({ timestamp: 1 })
+        .lean();
 
       res.status(200).json({
         success: true,
         data: {
           conversationId,
-          messages,
+          messages: messages.map((msg) => ({
+            id: msg._id.toString(),
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+          })),
         },
       });
     } catch (error) {
@@ -146,20 +182,23 @@ export class ChatController {
    */
   async createConversation(req: Request, res: Response) {
     try {
-      const userId = (req as any).userId;
-      const conversationId = `conv-${Date.now()}`;
+      const userId = (req as any).userId as string;
 
-      // Initialize empty conversation
-      this.conversations.set(conversationId, []);
+      const conversation = await Conversation.create({
+        userId,
+        title: 'New Conversation',
+        messageCount: 0,
+        lastMessageAt: null,
+      });
 
-      logger.info(`Conversation ${conversationId} created for user ${userId}`);
+      logger.info(`Conversation ${conversation._id.toString()} created for user ${userId}`);
 
       res.status(201).json({
         success: true,
         data: {
-          conversationId,
-          title: 'New Conversation',
-          date: new Date().toISOString(),
+          id: conversation._id.toString(),
+          title: conversation.title,
+          date: conversation.createdAt,
           messageCount: 0,
         },
       });
@@ -178,16 +217,18 @@ export class ChatController {
    */
   async getConversations(req: Request, res: Response) {
     try {
-      const userId = (req as any).userId;
+      const userId = (req as any).userId as string;
 
-      const userConversations = Array.from(this.conversations.entries())
-        .filter(([, messages]) => messages.some((msg) => msg.userId === userId))
-        .map(([conversationId, messages]) => ({
-          id: conversationId,
-          title: messages[0]?.content.substring(0, 50) || 'New Conversation',
-          date: messages[0]?.timestamp || new Date().toISOString(),
-          messageCount: messages.length,
-        }));
+      const conversations = await Conversation.find({ userId })
+        .sort({ lastMessageAt: -1, updatedAt: -1 })
+        .lean();
+
+      const userConversations = conversations.map((conversation) => ({
+        id: conversation._id.toString(),
+        title: conversation.title,
+        date: conversation.lastMessageAt || conversation.createdAt,
+        messageCount: conversation.messageCount,
+      }));
 
       res.status(200).json({
         success: true,
@@ -211,17 +252,31 @@ export class ChatController {
   async clearConversation(req: Request, res: Response) {
     try {
       const { conversationId } = req.body;
-      const userId = (req as any).userId;
+      const userId = (req as any).userId as string;
 
-      const messages = this.conversations.get(conversationId);
-      if (!messages || !messages.some((msg) => msg.userId === userId)) {
+      if (!Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid conversationId',
+        });
+      }
+
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        userId,
+      });
+
+      if (!conversation) {
         return res.status(403).json({
           success: false,
           message: 'Access denied',
         });
       }
 
-      this.conversations.delete(conversationId);
+      await Message.deleteMany({ conversationId, userId });
+      conversation.messageCount = 0;
+      conversation.lastMessageAt = null;
+      await conversation.save();
 
       logger.info(`Conversation ${conversationId} cleared`);
 
