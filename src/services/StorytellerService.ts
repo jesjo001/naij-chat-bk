@@ -7,8 +7,10 @@ import {
   Scene,
   DialogueLine,
   Storyboard,
-  PersonalityProfile
+  PersonalityProfile,
+  StoryGenerationInput
 } from '../types/index';
+import { storyGenerationService } from './storyGenerationService';
 
 export class StorytellerService {
   private personalities: Map<string, PersonalityProfile> = new Map();
@@ -104,6 +106,52 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
     try {
       logger.info(`Generating story: ${request.theme} in ${request.language}`);
 
+      if (process.env.GROQ_API_KEY) {
+        try {
+          type GeneratedStory = {
+            title?: string;
+            overview?: { logline?: string; synopsis?: string; moral?: string };
+            productionNotes?: Record<string, unknown> | string;
+            characters?: Character[];
+            script?: Record<string, unknown> | string;
+            metadata?: Story['metadata'];
+            generation?: Record<string, unknown>;
+            type?: string;
+          } & Record<string, unknown>;
+
+          const generated = (await storyGenerationService.generateStory(
+            this.mapToGenerationInput(request)
+          )) as unknown as GeneratedStory;
+
+          const story: Story = {
+            title: generated.title || this.generateStoryTitle(request),
+            synopsis:
+              generated.overview?.synopsis || generated.overview?.logline || this.generateSynopsis(request),
+            genre: this.determineGenre(request.storyType),
+            duration: request.storyLength,
+            language: request.language,
+            targetAudience: request.targetAudience,
+            animationStyle: request.animationStyle,
+            moral: generated.overview?.moral || request.moral || this.generateMoral(request),
+            theme: request.theme,
+            culturalSetting: request.culturalSetting,
+            createdAt: new Date(),
+            productionNotes: generated.productionNotes,
+            characters: generated.characters,
+            script: generated.script,
+            overview: generated.overview,
+            metadata: generated.metadata,
+            generation: generated.generation,
+            type: generated.type
+          };
+
+          logger.info(`Groq story generated: ${story.title}`);
+          return { ...generated, ...story } as Story;
+        } catch (error) {
+          logger.warn('Groq generation failed, falling back to local generator', { error });
+        }
+      }
+
       // Create a story structure based on the request
       const story: Story = {
         title: this.generateStoryTitle(request),
@@ -123,6 +171,23 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
       logger.error('Story generation failed:', error);
       throw new Error('Failed to generate story');
     }
+  }
+
+  private mapToGenerationInput(request: StoryRequest): StoryGenerationInput {
+    return {
+      storyType: request.storyType,
+      theme: request.theme,
+      duration: request.storyLength,
+      language: request.language,
+      animationStyle: request.animationStyle,
+      culturalSetting: request.culturalSetting,
+      targetAudience: request.targetAudience,
+      tier: request.tier,
+      templateId: request.templateId,
+      protagonistName: request.protagonistName,
+      antagonistName: request.antagonistName,
+      advancedOptions: request.advancedOptions
+    };
   }
 
   async generateCharacters(request: StoryRequest, characterCount: number = 4): Promise<Character[]> {
@@ -248,10 +313,12 @@ and rich cultural nuances that will resonate with Nigerian and African audiences
     const genres: { [key: string]: string } = {
       folktale: 'African Folktale / Comedy / Family',
       modern: 'Contemporary Drama / Comedy',
+      modern_nigerian: 'Contemporary Nigerian Drama / Comedy',
       children: 'Children\'s Adventure / Educational',
       marketing: 'Brand Story / Narrative Advertisement',
       film: 'Dramatic Film / Feature',
-      animation: 'Animated Adventure / Family'
+      animation: 'Animated Adventure / Family',
+      animation_script: 'Animated Adventure / Family'
     };
     return genres[storyType] || 'Adventure / Drama';
   }

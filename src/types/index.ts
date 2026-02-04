@@ -56,10 +56,26 @@ export interface Story {
   theme?: string;
   culturalSetting?: string;
   createdAt?: Date;
+  type?: string;
+  metadata?: {
+    language?: string;
+    duration?: number;
+    animationStyle?: string;
+    targetAudience?: string;
+  };
+  overview?: {
+    logline?: string;
+    synopsis?: string;
+    moral?: string;
+  };
+  characters?: Character[];
+  script?: Script | Record<string, unknown> | string;
+  productionNotes?: Record<string, unknown> | string;
+  generation?: Record<string, unknown>;
 }
 
 export interface StoryRequest {
-  storyType: 'folktale' | 'modern' | 'children' | 'marketing' | 'film' | 'animation';
+  storyType: 'folktale' | 'modern' | 'children' | 'marketing' | 'film' | 'animation' | 'modern_nigerian' | 'animation_script';
   theme: string;
   targetAudience: string;
   storyLength: number; // 5-30 minutes
@@ -72,6 +88,30 @@ export interface StoryRequest {
   tone?: string;
   includeProverbs?: boolean;
   includeSongs?: boolean;
+  templateId?: string;
+  tier?: 'free' | 'creator' | 'professional' | 'enterprise';
+  protagonistName?: string;
+  antagonistName?: string;
+  advancedOptions?: {
+    moral?: string;
+  };
+}
+
+export interface StoryGenerationInput {
+  storyType: string;
+  theme: string;
+  duration: number;
+  language: string;
+  animationStyle?: string;
+  culturalSetting?: string;
+  targetAudience?: string;
+  tier?: 'free' | 'creator' | 'professional' | 'enterprise';
+  templateId?: string;
+  protagonistName?: string;
+  antagonistName?: string;
+  advancedOptions?: {
+    moral?: string;
+  };
 }
 
 export interface Character {

@@ -5,8 +5,12 @@ import rateLimit from 'express-rate-limit';
 import 'dotenv/config';
 import { logger } from './utils/logger';
 import { initializeRedis, closeRedis } from './config/redis';
+import { connectDB, disconnectDB } from './config/mongodb';
 import { requestLogger, errorHandler } from './middleware/index';
 import apiRoutes from './routes/api';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
@@ -19,7 +23,10 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 // CORS configuration
-const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',');
+const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080'];
+const allowedOrigins = (process.env.CORS_ORIGIN || defaultOrigins.join(','))
+  .split(',')
+  .map((origin) => origin.trim());
 app.use(
   cors({
     origin: allowedOrigins,
@@ -92,6 +99,7 @@ app.use(errorHandler);
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
   logger.info('Graceful shutdown initiated...');
+  await disconnectDB();
   await closeRedis();
   process.exit(0);
 };
@@ -102,6 +110,9 @@ process.on('SIGINT', gracefulShutdown);
 // Start server
 async function startServer() {
   try {
+    // Connect to MongoDB
+    await connectDB();
+
     // Initialize Redis
     await initializeRedis();
 

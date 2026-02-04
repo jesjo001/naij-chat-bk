@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 
 // ============================================
@@ -46,10 +47,12 @@ export const validateStoryRequest = (
   const validStoryTypes = [
     'folktale',
     'modern',
+    'modern_nigerian',
     'children',
     'marketing',
     'film',
     'animation',
+    'animation_script'
   ];
 
   if (storyType && !validStoryTypes.includes(storyType)) {
@@ -224,6 +227,45 @@ export const asyncHandler = (
   };
 };
 
+// ============================================
+// Authentication Middleware
+// ============================================
+
+interface AuthenticatedRequest extends Request {
+  userId?: string;
+  email?: string;
+}
+
+export const verifyToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+
+    console.log('Verifying token:', token);
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided',
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      userId: string;
+      email: string;
+    };
+
+    req.userId = decoded.userId;
+    req.email = decoded.email;
+
+    next();
+  } catch (error) {
+    logger.error('Token verification error:', error);
+    res.status(401).json({
+      success: false,
+      message: 'Invalid token',
+    });
+  }
+};
+
 export default {
   errorHandler,
   validateStoryRequest,
@@ -232,4 +274,5 @@ export default {
   validateMarketingStrategyRequest,
   requestLogger,
   asyncHandler,
+  verifyToken,
 };
