@@ -15,6 +15,12 @@ type FilledTemplate = {
 };
 
 class StoryGenerationService {
+  private getTargetSceneCount(duration: number, tier: StoryGenerationInput['tier']) {
+    const base = Math.max(6, Math.round(duration));
+    const multiplier = tier === 'studio' ? 1.3 : tier === 'creator' ? 1.1 : 0.9;
+    return Math.max(6, Math.round(base * multiplier));
+  }
+
   async generateStory(userInput: StoryGenerationInput, options: { premiumPolish?: boolean } = {}) {
     const startTime = Date.now();
     const normalizedInput = {
@@ -122,7 +128,7 @@ class StoryGenerationService {
     })) as FilledTemplate;
 
     const templateCharacters = Array.isArray(filledTemplate.characters) ? filledTemplate.characters : [];
-    const templateScenes = Array.isArray(filledTemplate.scenes) ? filledTemplate.scenes : [];
+    let templateScenes = Array.isArray(filledTemplate.scenes) ? filledTemplate.scenes : [];
 
     const customizationPrompt = `Customize this story for Nigerian ${userInput.language} audience:
 
@@ -130,6 +136,7 @@ Theme: ${userInput.theme}
 Setting: ${userInput.culturalSetting}
 
 Add authentic ${userInput.language} dialogue and cultural details to make it feel genuine.
+IMPORTANT: All text must be written in ${userInput.language}.
 Keep it brief - only provide the customized elements.`;
 
     const customization = await groqService.generateCompletion({
@@ -137,6 +144,41 @@ Keep it brief - only provide the customized elements.`;
       model: 'llama-3.1-8b-instant',
       maxTokens: 1000
     });
+
+    const targetScenes = this.getTargetSceneCount(userInput.duration || 10, userInput.tier);
+    if (templateScenes.length < targetScenes) {
+      const additionalCount = targetScenes - templateScenes.length;
+      const existingScenes = templateScenes.map((scene, index) => {
+        if (typeof scene === 'string') {
+          return { sceneNumber: index + 1, heading: `SCENE ${index + 1}`, content: scene };
+        }
+
+        const record = scene as Record<string, unknown>;
+        return {
+          sceneNumber: index + 1,
+          heading: (record.heading as string) || (record.title as string) || `SCENE ${index + 1}`,
+          content: (record.content as string) || (record.description as string) || JSON.stringify(record)
+        };
+      });
+
+      const characterList = templateCharacters.map((character) => ({
+        name: String((character as Record<string, unknown>).name || 'Character'),
+        role: String((character as Record<string, unknown>).role || 'supporting')
+      }));
+
+      const extraScenes = await groqService.generateAdditionalScenes({
+        title: filledTemplate.title || template.name,
+        synopsis: template.description,
+        characters: characterList,
+        existingScenes,
+        language: userInput.language,
+        count: additionalCount
+      });
+
+      if (Array.isArray(extraScenes.scenes) && extraScenes.scenes.length > 0) {
+        templateScenes = [...templateScenes, ...extraScenes.scenes];
+      }
+    }
 
     const duration = Date.now() - startTime;
 
@@ -231,7 +273,7 @@ Keep it brief - only provide the customized elements.`;
 
   shouldUseTemplate(userInput: StoryGenerationInput): boolean {
     if (userInput.templateId) return true;
-    if (userInput.tier === 'free' || userInput.tier === 'creator') return true;
+    if (userInput.tier === 'starter' || userInput.tier === 'creator') return true;
     if (!userInput.theme || userInput.theme.length < 20) return true;
     return false;
   }

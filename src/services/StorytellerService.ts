@@ -11,6 +11,7 @@ import {
   StoryGenerationInput
 } from '../types/index';
 import { storyGenerationService } from './storyGenerationService';
+import { groqService } from './groqService';
 
 export class StorytellerService {
   private personalities: Map<string, PersonalityProfile> = new Map();
@@ -173,6 +174,67 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
     }
   }
 
+  async generateConcepts(request: StoryRequest, count: number = 5): Promise<Array<{ title: string; theme: string; logline: string }>> {
+    const fallback = this.buildFallbackConcepts(request, count);
+
+    if (!process.env.GROQ_API_KEY) {
+      return fallback;
+    }
+
+    try {
+      const toneList = (request as unknown as { tone?: string }).tone || '';
+      const systemPrompt = `You are an expert Nigerian storyteller who generates concise, high-quality story concepts.`;
+
+      const prompt = `Generate ${count} distinct story concepts.
+
+Story Type: ${request.storyType}
+Target Audience: ${request.targetAudience}
+Duration: ${request.storyLength} minutes
+Language: ${request.language}
+Cultural Setting: ${request.culturalSetting}
+Animation Style: ${request.animationStyle}
+Tone: ${toneList || 'balanced'}
+
+    Constraints:
+    - DO NOT include gods, deities, mamiwater, mermaids, spirits, witchcraft, or supernatural themes.
+    - Prefer grounded life stories (family,成长, career, community, faith, redemption) and Bible-inspired stories.
+    - Keep concepts culturally authentic and modern where applicable.
+
+Return JSON array ONLY with objects:
+[
+  { "title": "Concept title", "theme": "1-2 sentence theme", "logline": "One-sentence logline" }
+]`;
+
+      const result = await groqService.generateCompletion({
+        prompt,
+        systemPrompt,
+        model: 'llama-3.1-8b-instant',
+        maxTokens: 800,
+        temperature: 0.8
+      });
+
+      const parsed = this.extractJsonArray(result.content) as Array<{ title?: string; theme?: string; logline?: string }>;
+      const forbidden = /(god|gods|deity|deities|mamiwater|mermaid|spirit|spirits|witch|witchcraft|supernatural|sorcery|magic|shrine)/i;
+      const filtered = parsed.filter((item) => {
+        const text = `${item?.title ?? ''} ${item?.theme ?? ''} ${item?.logline ?? ''}`;
+        return !forbidden.test(text);
+      });
+
+      const normalized = filtered
+        .filter((item) => item && (item.title || item.theme || item.logline))
+        .map((item, index) => ({
+          title: item.title || `Story Concept ${index + 1}`,
+          theme: item.theme || 'A fresh and culturally rich theme for the chosen audience.',
+          logline: item.logline || 'A compelling one-line summary of the story concept.'
+        }));
+
+      return normalized.length > 0 ? normalized : fallback;
+    } catch (error) {
+      logger.warn('Concept generation failed, using fallback concepts', { error });
+      return fallback;
+    }
+  }
+
   private mapToGenerationInput(request: StoryRequest): StoryGenerationInput {
     return {
       storyType: request.storyType,
@@ -188,6 +250,37 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
       antagonistName: request.antagonistName,
       advancedOptions: request.advancedOptions
     };
+  }
+
+  private extractJsonArray(content: string): Record<string, unknown>[] {
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      logger.warn('Failed to parse concepts JSON array', { error });
+      return [];
+    }
+  }
+
+  private buildFallbackConcepts(request: StoryRequest, count: number) {
+    const baseThemes = [
+      'A young professional rebuilds their life after a major setback and discovers a new purpose.',
+      'A family learns to forgive and heal after a long-standing conflict threatens their future.',
+      'A community rallies together to support a struggling single parent pursuing a dream.',
+      'A faith-driven story of resilience as a person finds hope through prayer and mentorship.',
+      'A modern retelling of a Bible parable set in everyday Nigerian life.'
+    ];
+
+    return Array.from({ length: count }).map((_, index) => ({
+      title: `${this.generateStoryTitle(request)} Concept ${index + 1}`,
+      theme: baseThemes[index % baseThemes.length],
+      logline: `In a ${request.culturalSetting} setting, a ${request.targetAudience} tale unfolds about resilience, identity, and transformation.`
+    }));
   }
 
   async generateCharacters(request: StoryRequest, characterCount: number = 4): Promise<Character[]> {
@@ -281,6 +374,67 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
     }
   }
 
+  async generateMoreScenes(story: Story, script: Script | Record<string, unknown>, additionalScenes: number = 2) {
+    try {
+      const language = (story.language || (story as any)?.metadata?.language || 'english') as string;
+
+      if (process.env.GROQ_API_KEY) {
+        const existingScenes = Array.isArray((script as any)?.scenes) ? ((script as any).scenes as any[]) : [];
+        const characters = Array.isArray(story.characters) ? story.characters : [];
+
+        const result = await groqService.generateAdditionalScenes({
+          title: story.title,
+          synopsis: story.synopsis || (story as any)?.overview?.synopsis || '',
+          characters: characters.map((c: any) => ({
+            name: typeof c?.name === 'string' ? c.name : 'Character',
+            role: typeof c?.role === 'string' ? c.role : undefined
+          })),
+          existingScenes: existingScenes.map((scene, index) => ({
+            sceneNumber: scene.sceneNumber || index + 1,
+            heading: scene.heading,
+            content: scene.content || scene.action || scene.description
+          })),
+          language,
+          count: additionalScenes
+        });
+
+        const lastNumber = existingScenes.length;
+        const appended = result.scenes.map((scene, idx) => ({
+          sceneNumber: scene.sceneNumber || lastNumber + idx + 1,
+          heading: scene.heading || `SCENE ${lastNumber + idx + 1}`,
+          location: scene.location || 'UNKNOWN',
+          timeOfDay: scene.timeOfDay || 'DAY',
+          content: scene.content
+        }));
+
+        return {
+          ...(script as any),
+          format: (script as any)?.format || 'screenplay',
+          totalScenes: existingScenes.length + appended.length,
+          scenes: [...existingScenes, ...appended]
+        };
+      }
+
+      // Fallback: local scene generation
+      const existingScenes = Array.isArray((script as any)?.scenes) ? ((script as any).scenes as any[]) : [];
+      const characters = Array.isArray(story.characters) ? story.characters : [];
+      const extraScenes = this.generateScenes(story, characters as Character[], additionalScenes).map((scene, index) => ({
+        ...scene,
+        sceneNumber: existingScenes.length + index + 1
+      }));
+
+      return {
+        ...(script as any),
+        format: (script as any)?.format || 'screenplay',
+        totalScenes: existingScenes.length + extraScenes.length,
+        scenes: [...existingScenes, ...extraScenes]
+      };
+    } catch (error) {
+      logger.error('Generate more scenes failed:', error);
+      throw new Error('Failed to generate more scenes');
+    }
+  }
+
   getPersonality(personalityId: string): PersonalityProfile | null {
     return this.personalities.get(personalityId) || null;
   }
@@ -302,7 +456,8 @@ Give hope, encouragement, and faith-based wisdom while acknowledging struggles.`
   }
 
   private generateSynopsis(request: StoryRequest): string {
-    return `A captivating ${request.language} story about ${request.theme}. 
+    const languageHint = this.getLanguagePhrase(request.language);
+    return `${languageHint} A captivating ${request.language} story about ${request.theme}. 
 Set in ${request.culturalSetting}, this tale is perfect for ${request.targetAudience} 
 and carries the moral message: "${request.moral || 'wisdom triumphs over strength'}". 
 The story unfolds in ${request.storyLength} minutes, showcasing vibrant ${request.culturalSetting} landscapes 
@@ -402,7 +557,7 @@ and rich cultural nuances that will resonate with Nigerian and African audiences
         heading: `SCENE ${i}: ${this.generateSceneHeading()}`,
         description: `Scene ${i} of the story, showing ${story.theme || 'adventure'}`,
         action: `Character action for scene ${i}`,
-        dialogue: this.generateDialogue(characters),
+        dialogue: this.generateDialogue(characters, story.language),
         cameraAngle: this.generateCameraAngle(),
         soundCues: this.generateSoundCues(),
         frameNotes: ['Frame composition note 1', 'Frame composition note 2']
@@ -426,13 +581,24 @@ and rich cultural nuances that will resonate with Nigerian and African audiences
     return headings[Math.floor(Math.random() * headings.length)];
   }
 
-  private generateDialogue(characters: Character[]): DialogueLine[] {
+  private generateDialogue(characters: Character[], language: string): DialogueLine[] {
     return characters.slice(0, 2).map((char) => ({
       character: char.name,
-      line: `Dialogue from ${char.name}`,
+      line: this.getLanguagePhrase(language || 'english'),
       tone: 'Natural and engaging',
       action: 'Speaking with expression'
     }));
+  }
+
+  private getLanguagePhrase(language: string): string {
+    const phrases: Record<string, string> = {
+      pidgin: 'How far! Make we yarn this story together.',
+      yoruba: 'Báwo ni! Jẹ́ ká sọ ìtàn yìí pọ̀.',
+      igbo: 'Kedu! Ka anyi kpoo akuko a.',
+      hausa: 'Sannu! Mu yi wannan labari tare.',
+      english: 'Hello! Let us tell this story together.'
+    };
+    return phrases[language] || phrases.english;
   }
 
   private generateCameraAngle(): string {

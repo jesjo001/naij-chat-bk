@@ -13,7 +13,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app: Express = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5055;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Trust proxy - important for cPanel/VPS deployments
@@ -23,7 +23,7 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 // CORS configuration
-const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080'];
+const defaultOrigins = ['http://localhost:5174', 'http://localhost:8080'];
 const allowedOrigins = (process.env.CORS_ORIGIN || defaultOrigins.join(','))
   .split(',')
   .map((origin) => origin.trim());

@@ -89,7 +89,7 @@ export interface StoryRequest {
   includeProverbs?: boolean;
   includeSongs?: boolean;
   templateId?: string;
-  tier?: 'free' | 'creator' | 'professional' | 'enterprise';
+  tier?: 'starter' | 'creator' | 'studio';
   protagonistName?: string;
   antagonistName?: string;
   advancedOptions?: {
@@ -105,7 +105,7 @@ export interface StoryGenerationInput {
   animationStyle?: string;
   culturalSetting?: string;
   targetAudience?: string;
-  tier?: 'free' | 'creator' | 'professional' | 'enterprise';
+  tier?: 'starter' | 'creator' | 'studio';
   templateId?: string;
   protagonistName?: string;
   antagonistName?: string;

@@ -54,7 +54,39 @@ export interface ParsedScript {
   rawScript: string;
 }
 
+export interface AdditionalScene {
+  sceneNumber: number;
+  heading: string;
+  location?: string;
+  timeOfDay?: string;
+  content: string;
+}
+
 class GroqService {
+  private getTierQualityDirectives(tier: StoryGenerationInput['tier']) {
+    switch (tier) {
+      case 'studio':
+        return 'Deliver cinematic, production-ready writing with rich visual detail, subtext, and precise scene beats. Include nuanced character motivation and layered emotional arcs.';
+      case 'creator':
+        return 'Deliver high-quality, polished writing with strong pacing, vivid visuals, and emotionally resonant dialogue.';
+      case 'starter':
+      default:
+        return 'Keep it clear, concise, and easy to follow while staying culturally authentic.';
+    }
+  }
+
+  private getTargetSceneCount(duration: number, tier: StoryGenerationInput['tier']) {
+    const base = Math.max(6, Math.round(duration));
+    const multiplier = tier === 'studio' ? 1.3 : tier === 'creator' ? 1.1 : 0.9;
+    return Math.max(6, Math.round(base * multiplier));
+  }
+
+  private getScriptMaxTokens(duration: number, tier: StoryGenerationInput['tier']) {
+    const tierBoost = tier === 'studio' ? 1200 : tier === 'creator' ? 600 : 0;
+    const scaled = 2200 + duration * 200 + tierBoost;
+    return Math.min(8192, Math.max(3000, Math.round(scaled)));
+  }
+
   async generateCompletion({
     prompt,
     systemPrompt = '',
@@ -132,7 +164,9 @@ class GroqService {
   }
 
   async generateOutline(userInput: StoryGenerationInput): Promise<GroqCompletionResult & { outline: StoryOutline }> {
-    const systemPrompt = 'You are an expert Nigerian storyteller. Create concise story outlines.';
+    const tier = userInput.tier || 'starter';
+    const quality = this.getTierQualityDirectives(tier);
+    const systemPrompt = `You are an expert Nigerian storyteller. Create concise story outlines. Write all output in ${userInput.language}. ${quality}`;
 
     const prompt = `Create a story outline for:
 
@@ -140,6 +174,8 @@ Type: ${userInput.storyType}
 Theme: ${userInput.theme}
 Duration: ${userInput.duration} minutes
 Language: ${userInput.language}
+
+All fields (title, logline, synopsis, actStructure) must be written in ${userInput.language}.
 
 Output a JSON object with:
 {
@@ -174,7 +210,9 @@ Output a JSON object with:
     outline: StoryOutline,
     userInput: StoryGenerationInput
   ): Promise<GroqCompletionResult & { characters: Record<string, unknown>[] }> {
-    const systemPrompt = `You are an expert character designer for ${userInput.animationStyle} animation. Create detailed, culturally authentic Nigerian characters.`;
+    const tier = userInput.tier || 'starter';
+    const quality = this.getTierQualityDirectives(tier);
+    const systemPrompt = `You are an expert character designer for ${userInput.animationStyle} animation. Create detailed, culturally authentic Nigerian characters. ${quality}`;
 
     const prompt = `Create detailed profiles for these characters in the story "${outline.title}":
 
@@ -227,7 +265,11 @@ Return as JSON array: [character1, character2, ...]`;
     characters: Array<{ name: string; role?: string }>,
     userInput: StoryGenerationInput
   ): Promise<GroqCompletionResult & { parsedScript: ParsedScript }> {
-    const systemPrompt = `You are an expert Nigerian screenwriter. Write screenplays in proper format with authentic ${userInput.language} dialogue.`;
+    const tier = userInput.tier || 'starter';
+    const quality = this.getTierQualityDirectives(tier);
+    const targetScenes = this.getTargetSceneCount(userInput.duration || 10, tier);
+    const maxTokens = this.getScriptMaxTokens(userInput.duration || 10, tier);
+    const systemPrompt = `You are an expert Nigerian screenwriter. Write screenplays in proper format with ALL dialogue and action text in ${userInput.language}. ${quality}`;
 
     const characterList = characters.map((c) => `${c.name} (${c.role || 'supporting'})`).join(', ');
 
@@ -252,13 +294,16 @@ Format as screenplay with:
 - Camera directions
 - Sound cues
 
-Make it ${Math.ceil(userInput.duration / 2)} scenes.`;
+Target scene count: ${targetScenes} scenes.
+Keep pacing aligned to the requested duration (${userInput.duration} minutes).
+
+IMPORTANT: Every line of dialogue and action must be written in ${userInput.language}.`;
 
     const result = await this.generateCompletion({
       prompt,
       systemPrompt,
       model: MODELS.STANDARD,
-      maxTokens: 4096,
+      maxTokens,
       temperature: 0.85
     });
 
@@ -269,7 +314,9 @@ Make it ${Math.ceil(userInput.duration / 2)} scenes.`;
   }
 
   async generateProductionNotes(userInput: StoryGenerationInput): Promise<GroqCompletionResult & { notes: Record<string, unknown> }> {
-    const systemPrompt = `You are a film production expert specializing in ${userInput.animationStyle} animation.`;
+    const tier = userInput.tier || 'starter';
+    const quality = this.getTierQualityDirectives(tier);
+    const systemPrompt = `You are a film production expert specializing in ${userInput.animationStyle} animation. ${quality}`;
 
     const prompt = `Create production notes for a ${userInput.duration}-minute ${userInput.animationStyle} animated story.
 
@@ -295,6 +342,61 @@ Output as JSON.`;
     return {
       ...result,
       notes
+    };
+  }
+
+  async generateAdditionalScenes(params: {
+    title: string;
+    synopsis: string;
+    characters: Array<{ name: string; role?: string }>;
+    existingScenes: Array<{ sceneNumber?: number; heading?: string; content?: string }>;
+    language: string;
+    count: number;
+  }): Promise<GroqCompletionResult & { scenes: AdditionalScene[] }> {
+    const systemPrompt = `You are an expert Nigerian screenwriter. Continue scripts in proper screenplay format with authentic ${params.language} dialogue. Deliver higher fidelity and richer detail for premium tiers.`;
+
+    const characterList = params.characters.map((c) => `${c.name} (${c.role || 'supporting'})`).join(', ');
+    const existingSummary = params.existingScenes
+      .slice(-3)
+      .map((scene) => `Scene ${scene.sceneNumber}: ${scene.heading}\n${scene.content}`)
+      .join('\n\n');
+
+    const prompt = `Continue the screenplay with ${params.count} NEW scenes.
+
+Title: ${params.title}
+Synopsis: ${params.synopsis}
+Characters: ${characterList}
+Language: ${params.language}
+
+Recent scenes:
+${existingSummary || 'No prior scenes.'}
+
+Return a JSON array of scenes with fields:
+[
+  {
+    "sceneNumber": number,
+    "heading": "INT./EXT. LOCATION - TIME",
+    "location": "LOCATION",
+    "timeOfDay": "TIME",
+    "content": "Full scene content with action and dialogue in ${params.language}"
+  }
+]
+
+Make sure dialogue is in ${params.language}.`;
+
+    const result = await this.generateCompletion({
+      prompt,
+      systemPrompt,
+      model: MODELS.STANDARD,
+      maxTokens: 2048,
+      temperature: 0.85
+    });
+
+    const scenes = this.extractJsonArray(result.content) as unknown as AdditionalScene[];
+
+    return {
+      ...result,
+      scenes
     };
   }
 
