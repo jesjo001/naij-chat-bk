@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '../middleware/index';
-import { CommunityController } from '../controllers/CommunityController';
+import { asyncHandler } from '../middleware/index.js';
+import { CommunityController } from '../controllers/CommunityController.js';
 
 const router = Router();
 const communityController = new CommunityController();

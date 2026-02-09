@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import authRouter from './auth';
-import storytellerRouter from './storyteller';
-import communityRouter from './community';
-import adminRouter from './admin';
-import billingRouter from './billing';
+import authRouter from './auth.js';
+import storytellerRouter from './storyteller.js';
+import communityRouter from './community.js';
+import adminRouter from './admin.js';
+import billingRouter from './billing.js';
 
 const router = Router();
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler, validateStoryRequest } from '../middleware/index';
-import { StorytellerController } from '../controllers/StorytellerController';
+import { asyncHandler, validateStoryRequest } from '../middleware/index.js';
+import { StorytellerController } from '../controllers/StorytellerController.js';
 
 const router = Router();
 const storytellerController = new StorytellerController();

@@ -1,7 +1,7 @@
-import { groq, MODELS, DEFAULT_PARAMS, isGroqConfigured } from '../config/groq';
-import { logger } from '../utils/logger';
-import { countTokens } from '../utils/tokenCounter';
-import type { StoryGenerationInput } from '../types/index';
+import { groq, MODELS, DEFAULT_PARAMS, isGroqConfigured } from '../config/groq.js';
+import { logger } from '../utils/logger.js';
+import { countTokens } from '../utils/tokenCounter.js';
+import type { StoryGenerationInput } from '../types/index.js';
 
 interface GroqUsage {
   promptTokens: number;

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { getRedisClient, CACHE_TTL } from '../config/redis';
-import { logger } from '../utils/logger';
+import { getRedisClient, CACHE_TTL } from '../config/redis.js';
+import { logger } from '../utils/logger.js';
 
 class CachingService {
   private isEnabled(): boolean {

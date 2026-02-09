@@ -2,13 +2,17 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { logger } from './utils/logger';
-import { initializeRedis, closeRedis } from './config/redis';
-import { connectDB, disconnectDB } from './config/mongodb';
-import { requestLogger, errorHandler } from './middleware/index';
-import apiRoutes from './routes/api';
+import { logger } from './utils/logger.js';
+import { initializeRedis, closeRedis } from './config/redis.js';
+import { connectDB, disconnectDB } from './config/mongodb.js';
+import { requestLogger, errorHandler } from './middleware/index.js';
+import apiRoutes from './routes/api.js';
 import dotenv from 'dotenv';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
@@ -23,10 +27,12 @@ app.set('trust proxy', 1);
 app.use(helmet());
 
 // CORS configuration
-const defaultOrigins = ['http://localhost:5174', 'http://localhost:8080'];
-const allowedOrigins = (process.env.CORS_ORIGIN || defaultOrigins.join(','))
+const defaultOrigins = ['http://localhost:5174', 'http://localhost:8080', 'https://www.aimoviescript.online', 'https://aimoviescript.online'];
+const envOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
-  .map((origin) => origin.trim());
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 app.use(
   cors({
     origin: allowedOrigins,
@@ -53,6 +59,15 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
+// Serve static files from frontend dist in production
+const frontendDistPath = path.join(__dirname, '../../FRONTEND/dist');
+if (NODE_ENV === 'production') {
+  app.use(express.static(frontendDistPath, {
+    maxAge: '1d',
+    etag: false
+  }));
+}
+
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({
@@ -66,32 +81,32 @@ app.get('/health', (req: Request, res: Response) => {
 // API routes
 app.use('/api', apiRoutes);
 
-// Root endpoint
-app.get('/', (req: Request, res: Response) => {
-  res.json({
-    message: 'Naija Sabi Backend API',
-    version: '2.0.0',
-    architecture: 'MVC (Model-Controller-Service)',
-    endpoints: {
-      health: '/health',
-      data: '/api/data/*',
-      storyteller: '/api/storyteller/*',
-      personality: '/api/personality/*',
-      finance: '/api/finance/*',
-      hustleHub: '/api/hustle/*',
-      all: '/api/all'
-    }
+// SPA fallback: Serve index.html for any non-API, non-health route
+// This MUST be the last middleware to catch all unhandled routes
+if (NODE_ENV === 'production') {
+  app.get('*', (req: Request, res: Response) => {
+    const indexPath = path.join(frontendDistPath, 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        logger.error('Failed to serve index.html:', err);
+        res.status(500).json({
+          success: false,
+          error: 'Internal server error'
+        });
+      }
+    });
   });
-});
-
-// 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'Not found',
-    path: req.path
+} else {
+  // In development, show 404 for unmatched routes
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({
+      success: false,
+      error: 'Not found',
+      path: req.path,
+      message: 'In development mode, frontend should be running separately on port 8080'
+    });
   });
-});
+}
 
 // Error handling middleware
 app.use(errorHandler);

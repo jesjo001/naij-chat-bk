@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import User from '../models/User';
-import Story from '../models/Story';
-import CommunityStory from '../models/CommunityStory';
-import { logger } from '../utils/logger';
+import User from '../models/User.js';
+import Story from '../models/Story.js';
+import CommunityStory from '../models/CommunityStory.js';
+import { logger } from '../utils/logger.js';
 
 export class AdminController {
   /**

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { logger } from '../utils/logger';
-import User from '../models/User';
+import { logger } from '../utils/logger.js';
+import User from '../models/User.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -47,6 +47,7 @@ export class AuthController {
     try {
       const { name, email, password, state, language } = req.body;
 
+      console.log('Registering user:', { name, email, state, language }); 
       // Validate input
       if (!name || !email || !password) {
         return res.status(400).json({
@@ -64,6 +65,7 @@ export class AuthController {
         });
       }
 
+      console.log("user doesnt exist")
       // Create new user (password will be hashed by mongoose hook)
       const newUser = new User({
         email: email.toLowerCase(),
@@ -75,6 +77,7 @@ export class AuthController {
 
       await newUser.save();
 
+      console.log('New user registered:', newUser);
       // Generate JWT token
       const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
       const token = jwt.sign(

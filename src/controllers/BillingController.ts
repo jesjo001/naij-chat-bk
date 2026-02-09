@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import { logger } from '../utils/logger';
+import dotenv from 'dotenv';
+import { logger } from '../utils/logger.js';
+dotenv.config();
+
 
 export class BillingController {
   /**
@@ -16,6 +19,8 @@ export class BillingController {
         plan: 'creator' | 'studio';
         redirectUrl?: string;
       };
+      console.log('Initializing Flutterwave payment', { email, name, amount, plan, redirectUrl }); 
+      
 
       if (!email || !amount || !plan) {
         return res.status(400).json({
@@ -24,7 +29,9 @@ export class BillingController {
         });
       }
 
-      const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+      const secretKey = process.env.NODE_ENV === 'development' ? process.env.FLUTTERWAVE_SECRET_TEST_KEY : process.env.FLUTTERWAVE_SECRET_KEY;
+      console.log('Using Flutterwave Secret Key:', secretKey )
+      
       if (!secretKey) {
         return res.status(500).json({
           success: false,
@@ -32,7 +39,7 @@ export class BillingController {
         });
       }
 
-      const tx_ref = `storyteller_${plan}_${Date.now()}`;
+      const tx_ref = `aimoviescript_${plan}_${Date.now()}`;
 
       const response = await axios.post(
         'https://api.flutterwave.com/v3/payments',
@@ -40,7 +47,7 @@ export class BillingController {
           tx_ref,
           amount,
           currency: 'NGN',
-          redirect_url: redirectUrl || process.env.FLUTTERWAVE_REDIRECT_URL,
+          redirect_url: redirectUrl || process.env.FLUTTERWAVE_REDIRECT_URL || (process.env.NODE_ENV === 'development' ? process.env.FLUTTERWAVE_TEST_REDIRECT_URL : process.env.FLUTTERWAVE_REDIRECT_URL),
           customer: {
             email,
             name: name || email,
@@ -49,7 +56,7 @@ export class BillingController {
             plan,
           },
           customizations: {
-            title: 'Storyteller Studio',
+            title: 'AI Movie Script',
             description: `${plan.toUpperCase()} plan subscription`,
             logo: process.env.FLUTTERWAVE_LOGO_URL || undefined,
           },
@@ -61,6 +68,8 @@ export class BillingController {
           },
         }
       );
+
+      console.log('Flutterwave init response', response);
 
       res.json({
         success: true,
@@ -81,6 +90,7 @@ export class BillingController {
    */
   async verifyFlutterwave(req: Request, res: Response) {
     try {
+      console.log('Verifying Flutterwave payment', req.body);
       const { transactionId } = req.body as { transactionId: string };
 
       if (!transactionId) {
@@ -90,7 +100,9 @@ export class BillingController {
         });
       }
 
-      const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+      const secretKey = process.env.NODE_ENV === 'development' ? process.env.FLUTTERWAVE_SECRET_TEST_KEY : process.env.FLUTTERWAVE_SECRET_KEY;
+      console.log('Using Flutterwave Secret Key for verification:', secretKey);
+
       if (!secretKey) {
         return res.status(500).json({
           success: false,
@@ -107,6 +119,8 @@ export class BillingController {
           },
         }
       );
+
+      console.log('Flutterwave verify response', response);
 
       const data = response.data?.data;
       if (!data || data.status !== 'successful') {
@@ -129,6 +143,7 @@ export class BillingController {
         },
       });
     } catch (error) {
+      console.error('Flutterwave verify error', error);
       logger.error('Flutterwave verify error', { error });
       res.status(500).json({
         success: false,

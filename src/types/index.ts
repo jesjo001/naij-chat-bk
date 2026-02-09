@@ -79,7 +79,7 @@ export interface StoryRequest {
   theme: string;
   targetAudience: string;
   storyLength: number; // 5-30 minutes
-  language: 'pidgin' | 'yoruba' | 'igbo' | 'hausa' | 'english' | 'bilingual';
+  language: 'pidgin' | 'yoruba' | 'igbo' | 'hausa' | 'english' | 'english_international' | 'french' | 'spanish' | 'bilingual';
   culturalSetting: string;
   animationStyle: string;
   moral?: string;

@@ -1,6 +1,6 @@
-import tricksterTale from './tricksterTale';
-import heroJourney from './heroJourney';
-import loveStory from './loveStory';
+import tricksterTale from './tricksterTale.js';
+import heroJourney from './heroJourney.js';
+import loveStory from './loveStory.js';
 
 const templates = {
   trickster_tale: tricksterTale,

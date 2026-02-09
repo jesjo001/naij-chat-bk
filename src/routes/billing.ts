@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '../middleware/index';
-import { BillingController } from '../controllers/BillingController';
+import { asyncHandler } from '../middleware/index.js';
+import { BillingController } from '../controllers/BillingController.js';
 
 const router = Router();
 const billingController = new BillingController();

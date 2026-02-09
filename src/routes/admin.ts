@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler, verifyToken, requireAdmin } from '../middleware/index';
-import { AdminController } from '../controllers/AdminController';
+import { asyncHandler, verifyToken, requireAdmin } from '../middleware/index.js';
+import { AdminController } from '../controllers/AdminController.js';
 
 const router = Router();
 const adminController = new AdminController();

@@ -1,11 +1,11 @@
-import { groqService } from './groqService';
-import { templateEngine } from './templateEngine';
-import { cachingService } from './cachingService';
-import { logger } from '../utils/logger';
-import { COSTS, TOKEN_ESTIMATES } from '../config/constants';
-import { CACHE_TTL } from '../config/redis';
-import type { StoryGenerationInput } from '../types/index';
-import type { StoryOutline } from './groqService';
+import { groqService } from './groqService.js';
+import { templateEngine } from './templateEngine.js';
+import { cachingService } from './cachingService.js';
+import { logger } from '../utils/logger.js';
+import { COSTS, TOKEN_ESTIMATES } from '../config/constants.js';
+import { CACHE_TTL } from '../config/redis.js';
+import type { StoryGenerationInput } from '../types/index.js';
+import type { StoryOutline } from './groqService.js';
 
 type FilledTemplate = {
   title?: string;
@@ -70,7 +70,7 @@ class StoryGenerationService {
     totalCost += productionNotes.cost;
     totalTokens += productionNotes.tokens;
 
-    if (options.premiumPolish && normalizedInput.tier === 'professional') {
+    if (options.premiumPolish && normalizedInput.tier === 'studio') {
       logger.info('Premium polish step requested (not yet implemented)');
     }
 
@@ -176,7 +176,7 @@ Keep it brief - only provide the customized elements.`;
       });
 
       if (Array.isArray(extraScenes.scenes) && extraScenes.scenes.length > 0) {
-        templateScenes = [...templateScenes, ...extraScenes.scenes];
+        templateScenes = [...templateScenes, ...(extraScenes.scenes as unknown as Array<Record<string, unknown> | string>)];
       }
     }
 

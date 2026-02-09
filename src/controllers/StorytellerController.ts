@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { StorytellerService } from '../services/StorytellerService';
-import { StoryRequest } from '../types/index';
-import { logger } from '../utils/logger';
-import StoryUsage from '../models/StoryUsage';
+import { StorytellerService } from '../services/StorytellerService.js';
+import { StoryRequest } from '../types/index.js';
+import { logger } from '../utils/logger.js';
+import StoryUsage from '../models/StoryUsage.js';
 
 export class StorytellerController {
   private storytellerService: StorytellerService;
@@ -26,7 +26,7 @@ export class StorytellerController {
       const tier = (storyRequest.tier || 'starter').toLowerCase();
       const limits: Record<string, number> = {
         starter: 3,
-        creator: 10,
+        creator: 25,
         studio: Number.MAX_SAFE_INTEGER,
       };
 
