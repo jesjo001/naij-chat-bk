@@ -107,4 +107,31 @@ export class StorytellerController {
       next(error);
     }
   };
+
+  /**
+   * Generate additional scenes for an existing script
+   */
+  generateMoreScenes = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      logger.info('Generating more scenes', { params: req.body });
+      const { story, script, additionalScenes = 2 } = req.body;
+      const updatedScript = await this.storytellerService.generateMoreScenes(
+        story,
+        script,
+        Number(additionalScenes) || 2
+      );
+      res.json({
+        success: true,
+        data: updatedScript,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error('Error generating more scenes', { error });
+      next(error);
+    }
+  };
 }

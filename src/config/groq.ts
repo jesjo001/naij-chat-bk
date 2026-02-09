@@ -9,11 +9,12 @@ export const groq = new Groq({
   apiKey
 });
 
-// Model configurations
+// Model configurations (updated Feb 2026)
+// See: https://console.groq.com/docs/deprecations
 export const MODELS = {
-  FAST_SMALL: 'llama-3.1-8b-instant',
-  STANDARD: 'llama-3.1-70b-versatile',
-  LARGE: 'llama-3.2-90b-text-preview'
+  FAST_SMALL: 'llama-3.3-70b-versatile',
+  STANDARD: 'llama-3.3-70b-versatile',
+  LARGE: 'llama-3.3-70b-versatile'
 } as const;
 
 // Default generation parameters

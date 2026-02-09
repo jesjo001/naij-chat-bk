@@ -266,6 +266,24 @@ export const verifyToken = (req: AuthenticatedRequest, res: Response, next: Next
   }
 };
 
+export const requireAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+  const email = req.email?.toLowerCase();
+
+  if (!email || !adminEmails.includes(email)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin access required',
+    });
+  }
+
+  next();
+};
+
 export default {
   errorHandler,
   validateStoryRequest,
@@ -275,4 +293,5 @@ export default {
   requestLogger,
   asyncHandler,
   verifyToken,
+  requireAdmin,
 };

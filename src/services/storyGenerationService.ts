@@ -130,6 +130,7 @@ Theme: ${userInput.theme}
 Setting: ${userInput.culturalSetting}
 
 Add authentic ${userInput.language} dialogue and cultural details to make it feel genuine.
+IMPORTANT: All text must be written in ${userInput.language}.
 Keep it brief - only provide the customized elements.`;
 
     const customization = await groqService.generateCompletion({

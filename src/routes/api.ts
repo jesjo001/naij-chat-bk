@@ -7,6 +7,8 @@ import personalityRouter from './personality';
 import financeRouter from './finance';
 import hustleRouter from './hustle';
 import healthRouter from './health';
+import communityRouter from './community';
+import adminRouter from './admin';
 
 const router = Router();
 
@@ -18,5 +20,7 @@ router.use('/personality', personalityRouter);
 router.use('/finance', financeRouter);
 router.use('/hustle', hustleRouter);
 router.use('/health', healthRouter);
+router.use('/community', communityRouter);
+router.use('/admin', adminRouter);
 
 export default router;

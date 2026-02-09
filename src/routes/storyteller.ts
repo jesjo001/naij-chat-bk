@@ -29,4 +29,10 @@ router.post('/script', asyncHandler(storytellerController.generateScript));
  */
 router.post('/storyboard', asyncHandler(storytellerController.generateStoryboard));
 
+/**
+ * POST /api/storyteller/scenes
+ * Generate additional scenes for an existing script
+ */
+router.post('/scenes', asyncHandler(storytellerController.generateMoreScenes));
+
 export default router;

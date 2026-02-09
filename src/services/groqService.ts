@@ -54,6 +54,14 @@ export interface ParsedScript {
   rawScript: string;
 }
 
+export interface AdditionalScene {
+  sceneNumber: number;
+  heading: string;
+  location?: string;
+  timeOfDay?: string;
+  content: string;
+}
+
 class GroqService {
   async generateCompletion({
     prompt,
@@ -132,7 +140,7 @@ class GroqService {
   }
 
   async generateOutline(userInput: StoryGenerationInput): Promise<GroqCompletionResult & { outline: StoryOutline }> {
-    const systemPrompt = 'You are an expert Nigerian storyteller. Create concise story outlines.';
+    const systemPrompt = `You are an expert Nigerian storyteller. Create concise story outlines. Write all output in ${userInput.language}.`;
 
     const prompt = `Create a story outline for:
 
@@ -140,6 +148,8 @@ Type: ${userInput.storyType}
 Theme: ${userInput.theme}
 Duration: ${userInput.duration} minutes
 Language: ${userInput.language}
+
+All fields (title, logline, synopsis, actStructure) must be written in ${userInput.language}.
 
 Output a JSON object with:
 {
@@ -227,7 +237,7 @@ Return as JSON array: [character1, character2, ...]`;
     characters: Array<{ name: string; role?: string }>,
     userInput: StoryGenerationInput
   ): Promise<GroqCompletionResult & { parsedScript: ParsedScript }> {
-    const systemPrompt = `You are an expert Nigerian screenwriter. Write screenplays in proper format with authentic ${userInput.language} dialogue.`;
+    const systemPrompt = `You are an expert Nigerian screenwriter. Write screenplays in proper format with ALL dialogue and action text in ${userInput.language}.`;
 
     const characterList = characters.map((c) => `${c.name} (${c.role || 'supporting'})`).join(', ');
 
@@ -252,7 +262,9 @@ Format as screenplay with:
 - Camera directions
 - Sound cues
 
-Make it ${Math.ceil(userInput.duration / 2)} scenes.`;
+Make it ${Math.ceil(userInput.duration / 2)} scenes.
+
+IMPORTANT: Every line of dialogue and action must be written in ${userInput.language}.`;
 
     const result = await this.generateCompletion({
       prompt,
@@ -295,6 +307,61 @@ Output as JSON.`;
     return {
       ...result,
       notes
+    };
+  }
+
+  async generateAdditionalScenes(params: {
+    title: string;
+    synopsis: string;
+    characters: Array<{ name: string; role?: string }>;
+    existingScenes: Array<{ sceneNumber?: number; heading?: string; content?: string }>;
+    language: string;
+    count: number;
+  }): Promise<GroqCompletionResult & { scenes: AdditionalScene[] }> {
+    const systemPrompt = `You are an expert Nigerian screenwriter. Continue scripts in proper screenplay format with authentic ${params.language} dialogue.`;
+
+    const characterList = params.characters.map((c) => `${c.name} (${c.role || 'supporting'})`).join(', ');
+    const existingSummary = params.existingScenes
+      .slice(-3)
+      .map((scene) => `Scene ${scene.sceneNumber}: ${scene.heading}\n${scene.content}`)
+      .join('\n\n');
+
+    const prompt = `Continue the screenplay with ${params.count} NEW scenes.
+
+Title: ${params.title}
+Synopsis: ${params.synopsis}
+Characters: ${characterList}
+Language: ${params.language}
+
+Recent scenes:
+${existingSummary || 'No prior scenes.'}
+
+Return a JSON array of scenes with fields:
+[
+  {
+    "sceneNumber": number,
+    "heading": "INT./EXT. LOCATION - TIME",
+    "location": "LOCATION",
+    "timeOfDay": "TIME",
+    "content": "Full scene content with action and dialogue in ${params.language}"
+  }
+]
+
+Make sure dialogue is in ${params.language}.`;
+
+    const result = await this.generateCompletion({
+      prompt,
+      systemPrompt,
+      model: MODELS.STANDARD,
+      maxTokens: 2048,
+      temperature: 0.85
+    });
+
+    const scenes = this.extractJsonArray(result.content) as unknown as AdditionalScene[];
+
+    return {
+      ...result,
+      scenes
     };
   }
 
