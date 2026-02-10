@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { logger } from '../utils/logger';
 import { PersonalityProfile } from '../types/index';
+import { groqService } from './groqService';
+import { MODELS } from '../config/groq';
 
 export class PersonalityService {
   private personalities: Map<string, PersonalityProfile> = new Map();
@@ -9,6 +11,7 @@ export class PersonalityService {
   private openaiBaseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
   private openaiModel = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   private openaiTimeout = process.env.API_TIMEOUT ? parseInt(process.env.API_TIMEOUT) : 30000;
+  private gbtDefault = (process.env.GBT_DEFAULT || 'false').toLowerCase() === 'true';
 
   constructor() {
     this.initializePersonalities();
@@ -688,48 +691,64 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       throw new Error(`Personality not found: ${personalityId}`);
     }
 
-    if (!this.openaiApiKey) {
-      throw new Error('OPENAI_API_KEY is not set');
-    }
-
     const normalizedLanguage = this.normalizeLanguage(language);
     const languageInstruction = this.buildLanguageInstruction(normalizedLanguage);
     const systemPrompt = `${languageInstruction}\n\n${personality.systemPrompt}`.trim();
 
-    let response;
-    try {
-      response = await axios.post(
-        `${this.openaiBaseUrl}/chat/completions`,
-        {
-          model: this.openaiModel,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message },
-          ],
-          temperature: 0.8,
-          max_tokens: 400,
-        },
-        {
-          timeout: this.openaiTimeout,
-          headers: {
-            Authorization: `Bearer ${this.openaiApiKey}`,
-            'Content-Type': 'application/json',
+    if (this.gbtDefault) {
+      if (!this.openaiApiKey) {
+        throw new Error('OPENAI_API_KEY is not set');
+      }
+
+      let response;
+      try {
+        response = await axios.post(
+          `${this.openaiBaseUrl}/chat/completions`,
+          {
+            model: this.openaiModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: message },
+            ],
+            temperature: 0.8,
+            max_tokens: 400,
           },
-        }
-      );
-    } catch (error: any) {
-      const status = error?.response?.status;
-      const data = error?.response?.data;
-      logger.error('OpenAI request failed', { status, data });
-      throw new Error(`OpenAI request failed${status ? ` (status ${status})` : ''}`);
+          {
+            timeout: this.openaiTimeout,
+            headers: {
+              Authorization: `Bearer ${this.openaiApiKey}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const data = error?.response?.data;
+        logger.error('OpenAI request failed', { status, data });
+        throw new Error(`OpenAI request failed${status ? ` (status ${status})` : ''}`);
+      }
+
+      const content = response?.data?.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      return content;
     }
 
-    const content = response?.data?.choices?.[0]?.message?.content?.trim();
-    if (!content) {
-      throw new Error('Empty response from OpenAI');
+    const groqResult = await groqService.generateCompletion({
+      prompt: message,
+      systemPrompt,
+      model: MODELS.STANDARD,
+      temperature: 0.8,
+      maxTokens: 400
+    });
+
+    if (!groqResult.content?.trim()) {
+      throw new Error('Empty response from Groq');
     }
 
-    return content;
+    return groqResult.content.trim();
   }
 
   /**
