@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
-import { PersonalityService } from '../services/PersonalityService';
-import { logger } from '../utils/logger';
-import Conversation from '../models/Conversation';
-import Message from '../models/Message';
+import { PersonalityService } from '../services/PersonalityService.js';
+import { logger } from '../utils/logger.js';
+import Conversation from '../models/Conversation.js';
+import Message from '../models/Message.js';
+import User from '../models/User.js';
 
 export class ChatController {
   private personalityService = new PersonalityService();
@@ -17,6 +18,7 @@ export class ChatController {
     try {
       const { message, conversationId, language, personality } = req.body;
       const userId = (req as any).userId as string;
+      const now = new Date();
 
       // Validate input
       if (!message || !conversationId) {
@@ -31,6 +33,40 @@ export class ChatController {
           success: false,
           message: 'Invalid conversationId',
         });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found',
+        });
+      }
+
+      if (user.subscriptionEndDate && user.subscriptionEndDate < now) {
+        user.subscriptionStatus = 'expired';
+        user.subscriptionTier = 'free';
+        await user.save();
+      }
+
+      if (user.subscriptionTier === 'free' || user.subscriptionStatus !== 'active') {
+        const startOfDay = new Date(now);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(now);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const userMessagesToday = await Message.countDocuments({
+          userId,
+          role: 'user',
+          timestamp: { $gte: startOfDay, $lte: endOfDay },
+        });
+
+        if (userMessagesToday >= 20) {
+          return res.status(429).json({
+            success: false,
+            message: 'Free plan limit reached (20 messages/day). Upgrade to continue.',
+          });
+        }
       }
 
       const conversation = await Conversation.findOne({
@@ -65,12 +101,13 @@ export class ChatController {
         );
         aiResponse = response;
       } catch (error) {
-        logger.warn('Personality service error, using fallback response');
-        aiResponse = this.generateFallbackResponse(
-          message,
-          personality || 'lagos-hustler',
-          language || 'pidgin'
-        );
+        logger.error('Personality service failed to generate response:', error);
+        // Don't use dummy fallback - return error to user
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate AI response. Please try again.',
+          error: process.env.NODE_ENV === 'development' ? String(error) : undefined
+        });
       }
 
       const assistantMessageDoc = await Message.create({
@@ -345,54 +382,5 @@ export class ChatController {
     if (normalized === 'nigerian pidgin' || normalized === 'ng pidgin') return 'pidgin';
     if (normalized === 'en') return 'english';
     return normalized;
-  }
-
-  private generateFallbackResponse(message: string, personality: string, language: string): string {
-    const normalizedLanguage = this.normalizeLanguage(language);
-    const languageResponses: Record<string, string[]> = {
-      english: [
-        `I hear your question about "${message.substring(0, 30)}". Let me think it through and respond clearly.`,
-        `Thanks for the question on "${message.substring(0, 30)}". I'll break it down in clear English.`,
-      ],
-      yoruba: [
-        `Mo gbọ́ ìbéèrè rẹ̀ nípa "${message.substring(0, 30)}". Jẹ́ kí n rò ó dáadáa kí n sì dá ọ lóhùn.`,
-        `Ẹ ṣé fún ìbéèrè náà. Mo máa ṣàlàyé rẹ ní Yorùbá kedere.`,
-      ],
-      igbo: [
-        `Anụrụ m ajụjụ gị banyere "${message.substring(0, 30)}". Ka m tụlee ya nke ọma wee zaa gị.`,
-        `Daalụ maka ajụjụ ahụ. Aga m akọwa ya n'Igbo n'ụzọ doro anya.`,
-      ],
-      hausa: [
-        `Na ji tambayarka game da "${message.substring(0, 30)}". Bari in yi tunani sosai sannan in amsa.`,
-        `Na gode da tambayar. Zan yi bayani a Hausa cikin sauƙi.`,
-      ],
-    };
-
-    if (normalizedLanguage !== 'pidgin') {
-      const responses = languageResponses[normalizedLanguage] || languageResponses.english;
-      return responses[Math.floor(Math.random() * responses.length)];
-    }
-
-    const responses: Record<string, string[]> = {
-      'lagos-hustler': [
-        `I hear you well well! E be like say you ask something wey go make me think. Let me break am down for you in Naija style - ${message.substring(0, 30)}... no be joke sha!`,
-        `Omo, you don touch the right thing there! Na true word you talk. Lemme put am to you straight - ${message.substring(0, 30)} na the way forward for real real.`,
-      ],
-      'yoruba-sage': [
-        `Àh, àáre e, mo gbó̀ rẹ̀ dáadáa. "Oníbáàdé yó ńbá ibi, oníbáàdé yó ńbá owó" - What you say there have deep meaning, my child.`,
-        `E pẹ̀ jó̀ pé o mọ̀ ókọ́. In the wisdom of our forefathers, "${message.substring(0, 30)}" speaks truth.`,
-      ],
-      'naija-analyst': [
-        `Interesting question. Let me analyze the data on "${message.substring(0, 30)}". Based on current trends and metrics, here's what the numbers show...`,
-        `That's a valid point. From an analytical perspective, the indicators suggest that "${message.substring(0, 30)}" aligns with market trends.`,
-      ],
-      'street-oracle': [
-        `Ah, the spirits reveal something here. Your question about "${message.substring(0, 30)}" carries echoes of deeper truths waiting to be uncovered.`,
-        `I see it in the cosmic patterns - "${message.substring(0, 30)}" connects to forces beyond the ordinary. Listen well, for the answer dwells in the stories of old.`,
-      ],
-    };
-
-    const personalityResponses = responses[personality] || responses['lagos-hustler'];
-    return personalityResponses[Math.floor(Math.random() * personalityResponses.length)];
   }
 }

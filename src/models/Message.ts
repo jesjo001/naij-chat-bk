@@ -30,6 +30,7 @@ const MessageSchema = new Schema<IMessage>(
       type: String,
       enum: ['user', 'assistant'],
       required: true,
+      index: true, // Index for filtering by role
     },
     content: {
       type: String,
@@ -40,20 +41,28 @@ const MessageSchema = new Schema<IMessage>(
       type: String,
       required: true,
       default: 'pidgin',
+      index: true, // Index for language-based queries
     },
     personality: {
       type: String,
       required: true,
       default: 'lagos-hustler',
+      index: true, // Index for personality queries
     },
     timestamp: {
       type: Date,
       required: true,
       default: Date.now,
+      index: true, // Index for time-based queries
     },
   },
   { timestamps: true }
 );
+
+// Compound indexes for common query patterns
+MessageSchema.index({ conversationId: 1, timestamp: -1 }); // Get messages by conversation sorted by time
+MessageSchema.index({ userId: 1, createdAt: -1 }); // Get user messages sorted by creation
+MessageSchema.index({ conversationId: 1, role: 1 }); // Filter messages by conversation and role
 
 const Message = mongoose.model<IMessage>('Message', MessageSchema);
 

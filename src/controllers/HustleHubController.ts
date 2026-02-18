@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { HustleHubService } from '../services/HustleHubService';
-import { logger } from '../utils/logger';
+import { HustleHubService } from '../services/HustleHubService.js';
+import { logger } from '../utils/logger.js';
 
 export class HustleHubController {
   private hustleHubService: HustleHubService;

@@ -1,5 +1,5 @@
-import { logger } from '../utils/logger';
-import { MarketingResponse, ProductDescription } from '../types/index';
+import { logger } from '../utils/logger.js';
+import { MarketingResponse, ProductDescription } from '../types/index.js';
 
 export class HustleHubService {
   constructor() {}

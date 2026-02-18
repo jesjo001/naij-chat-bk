@@ -1,7 +1,7 @@
 import Queue from 'bull';
-import { storyGenerationService } from '../services/storyGenerationService';
-import { logger } from '../utils/logger';
-import type { StoryGenerationInput } from '../types/index';
+import { storyGenerationService } from '../services/storyGenerationService.js';
+import { logger } from '../utils/logger.js';
+import type { StoryGenerationInput } from '../types/index.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 

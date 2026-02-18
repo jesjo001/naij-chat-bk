@@ -7,6 +7,13 @@ export interface IUser extends Document {
   name: string;
   state: string;
   language: string;
+  role: 'user' | 'admin';
+  emailVerified: boolean;
+  subscriptionTier: 'free' | 'naija-plus' | 'business' | 'enterprise';
+  subscriptionStatus: 'active' | 'cancelled' | 'expired';
+  subscriptionStartDate?: Date;
+  subscriptionEndDate?: Date;
+  paymentHistory: string[]; // Array of payment IDs
   createdAt: Date;
   updatedAt: Date;
   comparePassword(password: string): Promise<boolean>;
@@ -39,15 +46,56 @@ const UserSchema = new Schema<IUser>(
     state: {
       type: String,
       required: true,
+      index: true, // Index for queries by state
     },
     language: {
       type: String,
       required: true,
       default: 'pidgin',
+      index: true, // Index for queries by language
     },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+      index: true, // Index for role-based queries
+    },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+      index: true, // Index for verification status queries
+    },
+    subscriptionTier: {
+        type: String,
+        enum: ['free', 'naija-plus', 'business', 'enterprise'],
+        default: 'free',
+        index: true, // Index for subscription queries
+      },
+      subscriptionStatus: {
+        type: String,
+        enum: ['active', 'cancelled', 'expired'],
+        default: 'active',
+        index: true, // Index for status checks
+      },
+      subscriptionStartDate: {
+        type: Date,
+      },
+      subscriptionEndDate: {
+        type: Date,
+        index: true, // Index for expiration queries
+      },
+      paymentHistory: {
+        type: [String],
+        default: [],
+      },
   },
   { timestamps: true }
 );
+
+// Compound indexes for common query patterns
+UserSchema.index({ email: 1, role: 1 });
+UserSchema.index({ subscriptionTier: 1, subscriptionStatus: 1 });
+UserSchema.index({ createdAt: -1 }); // For sorting by creation date
 
 // Hash password before saving
 UserSchema.pre('save', async function (next) {

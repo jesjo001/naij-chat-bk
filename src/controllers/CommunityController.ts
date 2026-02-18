@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import CommunityStory from '../models/CommunityStory';
-import { logger } from '../utils/logger';
+import CommunityStory from '../models/CommunityStory.js';
+import { logger } from '../utils/logger.js';
 
 export class CommunityController {
   private mapStory(story: any) {

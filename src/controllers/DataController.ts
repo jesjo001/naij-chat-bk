@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { DataScraperService } from '../services/DataScraperService';
-import { logger } from '../utils/logger';
+import { DataScraperService } from '../services/DataScraperService.js';
+import { logger } from '../utils/logger.js';
 
 export class DataController {
   private dataScraper: DataScraperService;

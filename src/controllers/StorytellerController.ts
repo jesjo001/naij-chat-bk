@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { StorytellerService } from '../services/StorytellerService';
-import { StoryRequest } from '../types/index';
-import { logger } from '../utils/logger';
+import { StorytellerService } from '../services/StorytellerService.js';
+import { StoryRequest } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 export class StorytellerController {
   private storytellerService: StorytellerService;

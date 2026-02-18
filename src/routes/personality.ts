@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '../middleware/index';
-import { PersonalityController } from '../controllers/PersonalityController';
+import { asyncHandler } from '../middleware/index.js';
+import { PersonalityController } from '../controllers/PersonalityController.js';
 
 const router = Router();
 const personalityController = new PersonalityController();

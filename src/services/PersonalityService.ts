@@ -1,8 +1,9 @@
 import axios from 'axios';
-import { logger } from '../utils/logger';
-import { PersonalityProfile } from '../types/index';
-import { groqService } from './groqService';
-import { MODELS } from '../config/groq';
+import { logger } from '../utils/logger.js';
+import { PersonalityProfile } from '../types/index.js';
+import { groqService } from './groqService.js';
+import { MODELS } from '../config/groq.js';
+import { dataScraperService } from './DataScraperService.js';
 
 export class PersonalityService {
   private personalities: Map<string, PersonalityProfile> = new Map();
@@ -679,6 +680,133 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
   }
 
   /**
+   * Detect if message is asking about exchange rates or currency
+   */
+  private isExchangeRateQuery(message: string): boolean {
+    const lowerMessage = message.toLowerCase();
+    const keywords = [
+      'dollar', 'naira', 'exchange', 'rate', 'currency', 'usd', 'ngn',
+      'pound', 'euro', 'gbp', 'eur', 'forex', 'parallel market',
+      'black market', 'cbn', 'wetin be dollar', 'how much be dollar',
+      'dollar rate', 'naira rate', 'exchange rate'
+    ];
+    return keywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  /**
+   * Detect if message is asking about fuel prices
+   */
+  private isFuelPriceQuery(message: string): boolean {
+    const lowerMessage = message.toLowerCase();
+    const keywords = [
+      'fuel', 'petrol', 'diesel', 'kerosene', 'pms', 'ago',
+      'fuel price', 'petrol price', 'how much be fuel',
+      'wetin be fuel price', 'filling station'
+    ];
+    return keywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  /**
+   * Detect if message is asking about news
+   */
+  private isNewsQuery(message: string): boolean {
+    const lowerMessage = message.toLowerCase();
+    const keywords = [
+      'news', 'headline', 'latest', 'today news', 'what happen',
+      'wetin dey happen', 'current events', 'breaking news'
+    ];
+    return keywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  /**
+   * Fetch live exchange rates and format them for AI context
+   */
+  private async getLiveExchangeRates(): Promise<string> {
+    try {
+      const rates = await dataScraperService.getExchangeRates();
+      if (!rates || rates.length === 0) {
+        return '';
+      }
+
+      const now = new Date();
+      let rateText = `\n\n=== LIVE EXCHANGE RATES (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
+      
+      rates.forEach(rate => {
+        rateText += `\n${rate.currency}:`;
+        if (rate.buy) rateText += `\n  - Buy: ₦${rate.buy.toFixed(2)}`;
+        if (rate.sell) rateText += `\n  - Sell: ₦${rate.sell.toFixed(2)}`;
+        if (rate.official) rateText += `\n  - Official (CBN): ₦${rate.official.toFixed(2)}`;
+        if (rate.parallel) rateText += `\n  - Parallel Market: ₦${rate.parallel.toFixed(2)}`;
+      });
+      
+      rateText += `\n\n⚠️ IMPORTANT: Use these LIVE rates in your response, not dummy/old data.\n`;
+      return rateText;
+    } catch (error) {
+      logger.error('Failed to fetch live exchange rates:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Fetch fuel prices and format them for AI context
+   */
+  private async getLiveFuelPrices(): Promise<string> {
+    try {
+      const prices = await dataScraperService.getFuelPrices();
+      if (!prices || prices.length === 0) {
+        return '';
+      }
+
+      const now = new Date();
+      let priceText = `\n\n=== FUEL PRICES (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
+      priceText += `NOTE: These are ESTIMATED prices - exact prices vary by station.\n`;
+      
+      prices.slice(0, 5).forEach(price => {
+        priceText += `\n${price.state} (${price.city}):`;
+        priceText += `\n  - Petrol: ₦${price.petrol}/liter`;
+        priceText += `\n  - Diesel: ₦${price.diesel}/liter`;
+        priceText += `\n  - Kerosene: ₦${price.kerosene}/liter`;
+      });
+      
+      priceText += `\n\n⚠️ Note: Use these estimated prices but inform user that actual prices may vary.\n`;
+      return priceText;
+    } catch (error) {
+      logger.error('Failed to fetch fuel prices:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Fetch news and format for AI context
+   */
+  private async getLiveNews(): Promise<string> {
+    try {
+      const newsItems = await dataScraperService.getNigerianNews();
+      if (!newsItems || newsItems.length === 0) {
+        return '';
+      }
+
+      const now = new Date();
+      let newsText = `\n\n=== LATEST NIGERIAN NEWS (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
+      
+      newsItems.slice(0, 5).forEach((item, index) => {
+        newsText += `\n${index + 1}. ${item.title}`;
+        newsText += `\n   Source: ${item.source}`;
+        newsText += `\n   ${item.summary.substring(0, 100)}...`;
+      });
+      
+      if (newsItems[0]?.source === 'System Notice') {
+        newsText += `\n\n⚠️ Note: Live news API not configured. Inform user to check official news sources.\n`;
+      }
+      
+      return newsText;
+    } catch (error) {
+      logger.error('Failed to fetch news:', error);
+      return '';
+    }
+  }
+
+  /**
    * Generate a personality-aware response using ChatGPT
    */
   async generatePersonalityResponse(
@@ -693,7 +821,26 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
 
     const normalizedLanguage = this.normalizeLanguage(language);
     const languageInstruction = this.buildLanguageInstruction(normalizedLanguage);
-    const systemPrompt = `${languageInstruction}\n\n${personality.systemPrompt}`.trim();
+    
+    // Check what type of data user is asking about and fetch live data
+    let liveDataContext = '';
+    
+    if (this.isExchangeRateQuery(message)) {
+      logger.info('Exchange rate query detected, fetching live data...');
+      liveDataContext += await this.getLiveExchangeRates();
+    }
+    
+    if (this.isFuelPriceQuery(message)) {
+      logger.info('Fuel price query detected, fetching data...');
+      liveDataContext += await this.getLiveFuelPrices();
+    }
+    
+    if (this.isNewsQuery(message)) {
+      logger.info('News query detected, fetching latest news...');
+      liveDataContext += await this.getLiveNews();
+    }
+    
+    const systemPrompt = `${languageInstruction}\n\n${personality.systemPrompt}${liveDataContext}`.trim();
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) {

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { FinancialService } from '../services/FinancialService';
-import { logger } from '../utils/logger';
+import { FinancialService } from '../services/FinancialService.js';
+import { logger } from '../utils/logger.js';
 
 export class FinancialController {
   private financialService: FinancialService;

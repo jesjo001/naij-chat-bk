@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
-import { logger } from '../utils/logger';
-import templates from '../templates';
+import { logger } from '../utils/logger.js';
+import templates from '../templates/index.js';
 
 interface TemplateDefinition {
   name: string;

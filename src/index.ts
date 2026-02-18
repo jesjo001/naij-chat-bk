@@ -2,12 +2,16 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
+import mongoSanitize from 'express-mongo-sanitize';
+import hpp from 'hpp';
 import 'dotenv/config';
-import { logger } from './utils/logger';
-import { initializeRedis, closeRedis } from './config/redis';
-import { connectDB, disconnectDB } from './config/mongodb';
-import { requestLogger, errorHandler } from './middleware/index';
-import apiRoutes from './routes/api';
+import { logger } from './utils/logger.js';
+import { initializeRedis, closeRedis } from './config/redis.js';
+import { connectDB, disconnectDB } from './config/mongodb.js';
+import { requestLogger, errorHandler } from './middleware/index.js';
+import { smartCache, etagMiddleware } from './middleware/caching.js';
+import apiRoutes from './routes/api.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -19,8 +23,47 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 // Trust proxy - important for cPanel/VPS deployments
 app.set('trust proxy', 1);
 
-// Security middleware
-app.use(helmet());
+// Security middleware - Enhanced helmet configuration
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  })
+);
+
+// Data sanitization against NoSQL injection
+app.use(mongoSanitize({
+  replaceWith: '_',
+}));
+
+// Prevent HTTP Parameter Pollution
+app.use(hpp() as any);
+
+// Compression middleware for response compression (gzip/brotli)
+app.use(
+  compression({
+    level: 6, // Balanced compression level
+    threshold: 1024, // Only compress responses > 1KB
+    filter: (req: any, res: any) => {
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }) as any
+);
 
 // CORS configuration
 const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080'];
@@ -31,27 +74,51 @@ app.use(
   cors({
     origin: allowedOrigins,
     credentials: true,
-    optionsSuccessStatus: 200
+    optionsSuccessStatus: 200,
+    maxAge: 86400, // Cache preflight requests for 24 hours
   })
 );
 
-// Body parser middleware
+// Body parser middleware with strict limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Request logging middleware
 app.use(requestLogger);
 
-// Rate limiting - 100 requests per 15 minutes per IP
+// HTTP caching middleware
+app.use(smartCache);
+app.use(etagMiddleware);
+
+// Aggressive rate limiting - Tiered approach
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per 15 minutes
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/health';
+  },
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 requests per minute for sensitive endpoints
+  message: 'Rate limit exceeded for this endpoint.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use('/api/', limiter);
+app.use('/api/auth/', strictLimiter); // Stricter for auth endpoints
+
+// Error handler (must be after routes)
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err.stack);
+  res.status(500).send('Something broke!');
+});
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {

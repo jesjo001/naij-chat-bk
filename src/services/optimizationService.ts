@@ -1,5 +1,5 @@
-import { logger } from '../utils/logger';
-import type { StoryGenerationInput } from '../types/index';
+import { logger } from '../utils/logger.js';
+import type { StoryGenerationInput } from '../types/index.js';
 
 class OptimizationService {
   normalizeInput(input: StoryGenerationInput): StoryGenerationInput {

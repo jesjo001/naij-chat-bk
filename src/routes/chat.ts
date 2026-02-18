@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler, verifyToken } from '../middleware/index';
-import { ChatController } from '../controllers/ChatController';
+import { asyncHandler, verifyToken } from '../middleware/index.js';
+import { ChatController } from '../controllers/ChatController.js';
 
 const router = Router();
 const chatController = new ChatController();

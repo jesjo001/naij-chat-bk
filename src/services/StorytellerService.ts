@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { logger } from '../utils/logger.js';
 import {
   Story,
   StoryRequest,
@@ -9,9 +9,9 @@ import {
   Storyboard,
   PersonalityProfile,
   StoryGenerationInput
-} from '../types/index';
-import { storyGenerationService } from './storyGenerationService';
-import { groqService } from './groqService';
+} from '../types/index.js';
+import { storyGenerationService } from './storyGenerationService.js';
+import { groqService } from './groqService.js';
 
 export class StorytellerService {
   private personalities: Map<string, PersonalityProfile> = new Map();

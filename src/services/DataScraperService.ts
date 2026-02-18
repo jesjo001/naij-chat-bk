@@ -1,8 +1,8 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { logger } from '../utils/logger';
-import { getRedisClient } from '../config/redis';
-import { FlightPrice, FoodPrice, StockInfo } from '../types/index';
+import { logger } from '../utils/logger.js';
+import { getRedisClient } from '../config/redis.js';
+import { FlightPrice, FoodPrice, StockInfo } from '../types/index.js';
 
 export interface ExchangeRate {
   currency: string;
@@ -41,20 +41,104 @@ export interface News {
   category: string;
 }
 
+/**
+ * In-memory cache fallback when Redis is unavailable
+ * Stores data with TTL (Time To Live) in memory
+ */
+class MemoryCache {
+  private cache: Map<string, { data: any; expiresAt: number }> = new Map();
+
+  set(key: string, value: any, ttlSeconds: number): void {
+    const expiresAt = Date.now() + ttlSeconds * 1000;
+    this.cache.set(key, { data: value, expiresAt });
+  }
+
+  get(key: string): any {
+    const item = this.cache.get(key);
+    if (!item) return null;
+    
+    if (Date.now() > item.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return item.data;
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
 export class DataScraperService {
   private timeout = process.env.API_TIMEOUT ? parseInt(process.env.API_TIMEOUT) : 30000;
+  private memoryCache = new MemoryCache();
+
+  /**
+   * Calculate seconds until midnight (cache expiration)
+   * Prevents constant scraping and reduces ban risk
+   */
+  private getSecondsUntilMidnight(): number {
+    const now = new Date();
+    const midnight = new Date();
+    midnight.setHours(24, 0, 0, 0);
+    const seconds = Math.ceil((midnight.getTime() - now.getTime()) / 1000);
+    return Math.max(seconds, 300); // Minimum 5 minutes
+  }
+
+  /**
+   * Set cache with fallback to memory cache if Redis unavailable
+   */
+  private async setCache(key: string, value: any, ttlSeconds: number): Promise<void> {
+    const redis = getRedisClient();
+    
+    if (redis) {
+      try {
+        await redis.setEx(key, ttlSeconds, JSON.stringify(value));
+        logger.debug(`Cached ${key} in Redis (${ttlSeconds}s TTL)`);
+      } catch (error) {
+        logger.warn(`Redis cache failed for ${key}, falling back to memory cache:`, error);
+        this.memoryCache.set(key, value, ttlSeconds);
+      }
+    } else {
+      logger.debug(`Redis unavailable, using memory cache for ${key} (${ttlSeconds}s TTL)`);
+      this.memoryCache.set(key, value, ttlSeconds);
+    }
+  }
+
+  /**
+   * Get cache with fallback to memory cache
+   */
+  private async getCache(key: string): Promise<any> {
+    const redis = getRedisClient();
+    
+    if (redis) {
+      try {
+        const cached = await redis.get(key);
+        if (cached) {
+          logger.debug(`Retrieved ${key} from Redis cache`);
+          return JSON.parse(cached);
+        }
+      } catch (error) {
+        logger.warn(`Redis cache retrieval failed for ${key}, checking memory cache:`, error);
+      }
+    }
+    
+    const memCached = this.memoryCache.get(key);
+    if (memCached) {
+      logger.debug(`Retrieved ${key} from memory cache`);
+      return memCached;
+    }
+    
+    return null;
+  }
 
   async getExchangeRates(): Promise<ExchangeRate[]> {
     try {
-      const redis = getRedisClient();
-      
       // Check cache first
-      if (redis) {
-        const cached = await redis.get('exchange_rates');
-        if (cached) {
-          logger.info('Exchange rates retrieved from cache');
-          return JSON.parse(cached);
-        }
+      const cached = await this.getCache('exchange_rates');
+      if (cached) {
+        return cached;
       }
 
       const rates: ExchangeRate[] = [];
@@ -79,9 +163,21 @@ export class DataScraperService {
         }
       }
 
-      // Cache for 5 minutes if we have Redis
-      if (redis && rates.length > 0) {
-        await redis.setEx('exchange_rates', 300, JSON.stringify(rates));
+      // Try third-party API as fallback
+      if (rates.length === 0) {
+        try {
+          const apiRates = await this.getExchangeRateAPI();
+          rates.push(...apiRates);
+          logger.info(`Fetched ${apiRates.length} rates from API fallback`);
+        } catch (error) {
+          logger.warn('Failed to get API rates:', error);
+        }
+      }
+
+      // Cache until midnight to prevent constant scraping
+      if (rates.length > 0) {
+        const secondsUntilMidnight = this.getSecondsUntilMidnight();
+        await this.setCache('exchange_rates', rates, secondsUntilMidnight);
       }
 
       return rates.length > 0
@@ -161,43 +257,105 @@ export class DataScraperService {
     return rates;
   }
 
+  /**
+   * Fetch exchange rates from a third-party API (exchangerate-api.com)
+   * This is a more reliable fallback than web scraping
+   */
+  private async getExchangeRateAPI(): Promise<ExchangeRate[]> {
+    try {
+      // Using free tier of exchangerate-api.com (no API key needed for basic usage)
+      const response = await axios.get('https://open.er-api.com/v6/latest/NGN', {
+        timeout: this.timeout
+      });
+
+      if (!response.data || !response.data.rates) {
+        throw new Error('Invalid API response');
+      }
+
+      const rates: ExchangeRate[] = [];
+      const { rates: apiRates } = response.data;
+
+      // Convert to NGN rates (API gives rates FROM NGN, we need TO NGN)
+      if (apiRates.USD) {
+        const usdToNgn = 1 / apiRates.USD;
+        rates.push({
+          currency: 'US Dollar',
+          buy: usdToNgn * 1.01, // Add 1% spread
+          sell: usdToNgn * 0.99,
+          parallel: usdToNgn * 1.15 // Estimate parallel market at 15% premium
+        });
+      }
+
+      if (apiRates.GBP) {
+        const gbpToNgn = 1 / apiRates.GBP;
+        rates.push({
+          currency: 'British Pound',
+          buy: gbpToNgn * 1.01,
+          sell: gbpToNgn * 0.99,
+          parallel: gbpToNgn * 1.15
+        });
+      }
+
+      if (apiRates.EUR) {
+        const eurToNgn = 1 / apiRates.EUR;
+        rates.push({
+          currency: 'Euro',
+          buy: eurToNgn * 1.01,
+          sell: eurToNgn * 0.99,
+          parallel: eurToNgn * 1.15
+        });
+      }
+
+      logger.info(`Fetched exchange rates from API for ${rates.length} currencies`);
+      return rates;
+    } catch (error) {
+      logger.error('Exchange rate API fetch failed:', error);
+      throw error;
+    }
+  }
+
   private getDefaultExchangeRates(): ExchangeRate[] {
+    logger.warn('Using default/fallback exchange rates - live data unavailable');
+    // Updated to realistic Feb 2026 estimates
     return [
       {
-        currency: 'US Dollar',
-        buy: 1550,
-        sell: 1560,
-        official: 1500
+        currency: 'US Dollar (Fallback - may be outdated)',
+        buy: 1680,
+        sell: 1700,
+        official: 1620,
+        parallel: 1750
       },
       {
-        currency: 'British Pound',
-        buy: 1950,
-        sell: 1970,
-        official: 1900
+        currency: 'British Pound (Fallback - may be outdated)',
+        buy: 2100,
+        sell: 2130,
+        official: 2050,
+        parallel: 2200
       },
       {
-        currency: 'Euro',
-        buy: 1700,
-        sell: 1720,
-        official: 1650
+        currency: 'Euro (Fallback - may be outdated)',
+        buy: 1820,
+        sell: 1850,
+        official: 1780,
+        parallel: 1900
       }
     ];
   }
 
   async getFuelPrices(): Promise<FuelPrice[]> {
     try {
-      const redis = getRedisClient();
-      
-      // Check cache
-      if (redis) {
-        const cached = await redis.get('fuel_prices');
-        if (cached) {
-          logger.info('Fuel prices retrieved from cache');
-          return JSON.parse(cached);
-        }
+      // Check cache first
+      const cached = await this.getCache('fuel_prices');
+      if (cached) {
+        return cached;
       }
 
-      // Return realistic mock data for major Nigerian cities
+      // Try to fetch from PPPRA or NNPC (placeholder - needs real API)
+      // Currently no free public API available for real-time fuel prices
+      logger.warn('Fuel prices: No live API available - using estimated data');
+      
+      // Estimated current prices based on market trends (Feb 2026)
+      // TODO: Integrate with NNPC/PPPRA API when available
       const prices: FuelPrice[] = [
         {
           state: 'Lagos',
@@ -241,12 +399,11 @@ export class DataScraperService {
         }
       ];
 
-      // Cache for 1 hour if Redis available
-      if (redis) {
-        await redis.setEx('fuel_prices', 3600, JSON.stringify(prices));
-      }
+      // Cache until midnight to prevent constant lookups
+      const secondsUntilMidnight = this.getSecondsUntilMidnight();
+      await this.setCache('fuel_prices', prices, secondsUntilMidnight);
 
-      logger.info(`Fuel prices retrieved for ${prices.length} locations`);
+      logger.info(`Fuel prices retrieved for ${prices.length} locations (estimated data)`);
       return prices;
     } catch (error) {
       logger.error('Fuel price fetch failed:', error);
@@ -257,14 +414,11 @@ export class DataScraperService {
   async getNepaStatus(location: string): Promise<NepaStatus> {
     try {
       const cacheKey = `nepa_status:${location.toLowerCase()}`;
-      const redis = getRedisClient();
       
-      if (redis) {
-        const cached = await redis.get(cacheKey);
-        if (cached) {
-          logger.info(`NEPA status retrieved from cache for ${location}`);
-          return JSON.parse(cached);
-        }
+      // Check cache first
+      const cached = await this.getCache(cacheKey);
+      if (cached) {
+        return cached;
       }
 
       // Generate realistic status based on location
@@ -283,9 +437,7 @@ export class DataScraperService {
       };
 
       // Cache for 5 minutes
-      if (redis) {
-        await redis.setEx(cacheKey, 300, JSON.stringify(status));
-      }
+      await this.setCache(cacheKey, status, 300);
 
       logger.info(`NEPA status retrieved for ${location}`);
       return status;
@@ -302,67 +454,126 @@ export class DataScraperService {
 
   async getNigerianNews(): Promise<News[]> {
     try {
-      const redis = getRedisClient();
-      
-      if (redis) {
-        const cached = await redis.get('nigerian_news');
-        if (cached) {
-          logger.info('Nigerian news retrieved from cache');
-          return JSON.parse(cached);
-        }
+      // Check cache first
+      const cached = await this.getCache('nigerian_news');
+      if (cached) {
+        return cached;
       }
 
-      // Return realistic mock news data
-      const news: News[] = [
-        {
-          title: 'Naira Gains Against Dollar in Parallel Market',
-          source: 'Business Day',
-          url: 'https://businessday.ng',
-          summary: 'The Naira appreciated to N890/$ in the parallel market amid improved dollar inflows...',
-          published_at: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-          category: 'Business'
-        },
-        {
-          title: 'NERC Approves New Electricity Tariff',
-          source: 'Punch Newspapers',
-          url: 'https://punchng.com',
-          summary: 'The Nigerian Electricity Regulatory Commission has approved new tariff rates effective next month...',
-          published_at: new Date(Date.now() - 4 * 60 * 60 * 1000), // 4 hours ago
-          category: 'Business'
-        },
-        {
-          title: 'CBN Maintains Policy Rate at 27.25%',
-          source: 'ThisDay',
-          url: 'https://thisday.com',
-          summary: 'The Central Bank of Nigeria kept the benchmark interest rate unchanged during its latest monetary policy meeting...',
-          published_at: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
-          category: 'Business'
-        },
-        {
-          title: 'Fuel Subsidy Removal: Impact on Transportation Sector',
-          source: 'Vanguard',
-          url: 'https://vanguardngr.com',
-          summary: 'Transportation operators call for government intervention as fuel prices continue to soar...',
-          published_at: new Date(Date.now() - 8 * 60 * 60 * 1000), // 8 hours ago
-          category: 'Business'
-        },
-        {
-          title: 'Tech Startups Leading African Innovation',
-          source: 'TechCrunch Africa',
-          url: 'https://techcrunch.com',
-          summary: 'Nigerian tech ecosystem continues to attract global investment and talent...',
-          published_at: new Date(Date.now() - 10 * 60 * 60 * 1000), // 10 hours ago
-          category: 'Technology'
-        }
+      const news: News[] = [];
+
+      // Free news sources - no API key needed, using RSS feeds and web scraping
+      const newsSources = [
+        { url: 'https://punchng.com/feed/', name: 'Punch Newspapers' },
+        { url: 'https://www.vanguardngr.com/feed/', name: 'Vanguard' },
+        { url: 'https://businessday.ng/feed/', name: 'Business Day' },
+        { url: 'https://www.thisdaylive.com/feed/', name: 'ThisDay' },
       ];
 
-      // Cache for 15 minutes
-      if (redis) {
-        await redis.setEx('nigerian_news', 900, JSON.stringify(news));
+      // Scrape RSS feeds from multiple Nigerian news sources
+      for (const source of newsSources) {
+        try {
+          const response = await axios.get(source.url, {
+            timeout: this.timeout,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          });
+
+          const $ = cheerio.load(response.data);
+          
+          // Parse RSS items
+          $('item').slice(0, 3).each((i, elem) => {
+            try {
+              const title = $(elem).find('title').text().trim();
+              const link = $(elem).find('link').text().trim();
+              const description = $(elem).find('description').text().trim().replace(/<[^>]*>/g, '');
+              const pubDate = $(elem).find('pubDate').text().trim();
+              const category = $(elem).find('category').text().trim() || 'General';
+
+              if (title && link) {
+                news.push({
+                  title: title.substring(0, 150),
+                  source: source.name,
+                  url: link,
+                  summary: description.substring(0, 200),
+                  published_at: pubDate ? new Date(pubDate) : new Date(),
+                  category: category.substring(0, 20)
+                });
+              }
+            } catch (parseError) {
+              logger.debug(`Failed to parse RSS item from ${source.name}:`, parseError);
+            }
+          });
+
+          logger.info(`Scraped news from ${source.name}`);
+        } catch (error) {
+          logger.warn(`Failed to fetch RSS feed from ${source.name}:`, error);
+        }
       }
 
-      logger.info(`Retrieved ${news.length} news items`);
-      return news;
+      // If RSS feeds fail, try scraping web pages directly
+      if (news.length < 5) {
+        try {
+          const punchResponse = await axios.get('https://punchng.com', {
+            timeout: this.timeout,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          });
+
+          const $ = cheerio.load(punchResponse.data);
+          
+          // Extract news headlines from main page
+          $('h2, h3').slice(0, 5).each((i, elem) => {
+            const text = $(elem).text().trim();
+            const link = $(elem).find('a').attr('href') || '';
+            
+            if (text && text.length > 10 && link) {
+              news.push({
+                title: text.substring(0, 150),
+                source: 'Punch Newspapers',
+                url: link.startsWith('http') ? link : `https://punchng.com${link}`,
+                summary: text.substring(0, 100),
+                published_at: new Date(),
+                category: 'General'
+              });
+            }
+          });
+
+          logger.info(`Scraped headlines from Punch website`);
+        } catch (error) {
+          logger.warn('Failed to scrape Punch website:', error);
+        }
+      }
+
+      // Deduplicate news by title
+      const uniqueNews = news.reduce((acc: News[], item) => {
+        if (!acc.find(n => n.title === item.title)) {
+          acc.push(item);
+        }
+        return acc;
+      }, []).slice(0, 10); // Keep top 10
+
+      // If still no news, show notice
+      if (uniqueNews.length === 0) {
+        logger.warn('No live news scraped - showing notice');
+        uniqueNews.push({
+          title: 'Check Official Nigerian News Sources',
+          source: 'System Notice',
+          url: 'https://punchng.com',
+          summary: 'Visit Punch, Vanguard, BusinessDay, or ThisDay for latest news.',
+          published_at: new Date(),
+          category: 'Notice'
+        });
+      }
+
+      // Cache until midnight to prevent constant scraping
+      const secondsUntilMidnight = this.getSecondsUntilMidnight();
+      await this.setCache('nigerian_news', uniqueNews, secondsUntilMidnight);
+
+      logger.info(`Retrieved ${uniqueNews.length} unique news items`);
+      return uniqueNews;
     } catch (error) {
       logger.error('News fetch failed:', error);
       return [];
@@ -383,6 +594,11 @@ export class DataScraperService {
       }
 
       logger.info('Fetching flight prices from APIs...');
+
+      // NOTE: Real-time flight prices require API partnerships with airlines
+      // or third-party services like Amadeus, Skyscanner API (paid)
+      // Current data is estimated for demonstration
+      logger.warn('Flight prices: Using simulated data - real APIs require paid partnerships');
 
       // Simulated flight data from major Nigerian airlines
       const flights: FlightPrice[] = [
@@ -471,6 +687,11 @@ export class DataScraperService {
 
       logger.info('Fetching food commodity prices...');
 
+      // NOTE: Real-time commodity prices would require integration with
+      // NAFDAC, market boards, or agricultural data APIs
+      // Current data represents estimated market averages
+      logger.warn('Food prices: Using estimated market averages - real-time tracking not available');
+
       // Nigerian food prices (approximate monthly average)
       const foodPrices: FoodPrice[] = [
         { commodity: 'Rice (50kg)', unit: 'bag', priceNGN: 28000, pricePerKg: 560, trend: 'stable' },
@@ -517,6 +738,11 @@ export class DataScraperService {
       }
 
       logger.info('Fetching NGX stock market data...');
+
+      // NOTE: Real-time NGX data requires official API access from Nigerian Exchange
+      // or third-party financial data providers (Bloomberg, Reuters, etc.)
+      // Current data is simulated for demonstration
+      logger.warn('Stock data: Using simulated data - NGX API requires authorization');
 
       // Top Nigerian stocks
       const stocks: StockInfo[] = [

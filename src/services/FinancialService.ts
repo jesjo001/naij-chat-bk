@@ -1,5 +1,5 @@
-import { logger } from '../utils/logger';
-import { BudgetTemplate, BudgetBreakdown, BudgetCategory } from '../types/index';
+import { logger } from '../utils/logger.js';
+import { BudgetTemplate, BudgetBreakdown, BudgetCategory } from '../types/index.js';
 
 export class FinancialService {
   constructor() {}

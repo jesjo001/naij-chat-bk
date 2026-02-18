@@ -3,8 +3,8 @@ import {
   asyncHandler,
   validateProductDescriptionRequest,
   validateMarketingStrategyRequest,
-} from '../middleware/index';
-import { HustleHubController } from '../controllers/HustleHubController';
+} from '../middleware/index.js';
+import { HustleHubController } from '../controllers/HustleHubController.js';
 
 const router = Router();
 const hustleHubController = new HustleHubController();

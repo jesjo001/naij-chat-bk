@@ -31,10 +31,15 @@ const ConversationSchema = new Schema<IConversation>(
     lastMessageAt: {
       type: Date,
       default: null,
+      index: true, // Index for sorting by last activity
     },
   },
   { timestamps: true }
 );
+
+// Compound indexes for common query patterns
+ConversationSchema.index({ userId: 1, lastMessageAt: -1 }); // Get user conversations sorted by activity
+ConversationSchema.index({ userId: 1, createdAt: -1 }); // Get user conversations sorted by creation
 
 const Conversation = mongoose.model<IConversation>('Conversation', ConversationSchema);
 

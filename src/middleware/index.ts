@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { logger } from '../utils/logger';
+import User from '../models/User.js';
+import { logger } from '../utils/logger.js';
 
 // ============================================
 // Error Handler Middleware
@@ -220,7 +221,7 @@ export const requestLogger = (
 // ============================================
 
 export const asyncHandler = (
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void> | void
+  fn: (req: Request, res: Response, next: NextFunction) => any
 ) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
@@ -234,9 +235,110 @@ export const asyncHandler = (
 interface AuthenticatedRequest extends Request {
   userId?: string;
   email?: string;
+  user?: {
+    userId: string;
+    email: string;
+  };
 }
 
-export const verifyToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  // ============================================
+  // ============================================
+  // JWT Authentication Middleware
+  // ============================================
+
+  export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const token = req.headers.authorization?.split(' ')[1];
+
+      if (!token) {
+        res.status(401).json({
+          success: false,
+          message: 'No token provided',
+        });
+        return;
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+        userId: string;
+        email: string;
+      };
+
+      (req as AuthenticatedRequest).user = { userId: decoded.userId, email: decoded.email };
+      next();
+    } catch (error) {
+      logger.error('Token authentication error:', error);
+      res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token',
+      });
+    }
+  };
+
+  // ============================================
+  // Subscription Check Middleware
+  // ============================================
+
+  type SubscriptionTier = 'free' | 'naija-plus' | 'business' | 'enterprise';
+
+  export const requireSubscription = (minTier: SubscriptionTier) => {
+    const tierLevels: Record<SubscriptionTier, number> = {
+      free: 0,
+      'naija-plus': 1,
+      business: 2,
+      enterprise: 3,
+    };
+
+    return async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.user?.userId) {
+          return res.status(401).json({
+            success: false,
+            message: 'Authentication required',
+          });
+        }
+
+        const user = await User.findById(authReq.user.userId);
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: 'User not found',
+          });
+        }
+
+        // Check if subscription has expired
+        const now = new Date();
+        if (user.subscriptionEndDate && user.subscriptionEndDate < now && user.subscriptionTier !== 'free') {
+          user.subscriptionStatus = 'expired';
+          user.subscriptionTier = 'free';
+          await user.save();
+        }
+
+        // Check subscription tier level
+        const userTierLevel = tierLevels[user.subscriptionTier];
+        const requiredTierLevel = tierLevels[minTier];
+
+        if (userTierLevel < requiredTierLevel) {
+          return res.status(403).json({
+            success: false,
+            message: `This feature requires ${minTier} subscription or higher`,
+            currentTier: user.subscriptionTier,
+            requiredTier: minTier,
+          });
+        }
+
+        next();
+      } catch (error) {
+        logger.error('Subscription check error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to verify subscription',
+        });
+      }
+    };
+  };
+
+export const verifyToken = (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
 
@@ -253,8 +355,9 @@ export const verifyToken = (req: AuthenticatedRequest, res: Response, next: Next
       email: string;
     };
 
-    req.userId = decoded.userId;
-    req.email = decoded.email;
+    const authReq = req as AuthenticatedRequest;
+    authReq.userId = decoded.userId;
+    authReq.email = decoded.email;
 
     next();
   } catch (error) {
@@ -266,13 +369,62 @@ export const verifyToken = (req: AuthenticatedRequest, res: Response, next: Next
   }
 };
 
-export const requireAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+/**
+ * Middleware to verify email is confirmed before accessing protected resources
+ */
+export const requireEmailVerification = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    
+    if (!authReq.userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+
+    const user = await User.findById(authReq.userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        message: 'Email verification required. Please verify your email address before accessing this resource.',
+        code: 'EMAIL_NOT_VERIFIED',
+        data: {
+          email: user.email,
+        },
+      });
+    }
+
+    next();
+  } catch (error) {
+    logger.error('Email verification check error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Email verification check failed',
+    });
+  }
+};
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   const adminEmails = (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
-  const email = req.email?.toLowerCase();
+  const authReq = req as AuthenticatedRequest;
+  const email = authReq.email?.toLowerCase();
 
   if (!email || !adminEmails.includes(email)) {
     return res.status(403).json({
@@ -292,6 +444,9 @@ export default {
   validateMarketingStrategyRequest,
   requestLogger,
   asyncHandler,
+    authenticateToken,
+    requireSubscription,
   verifyToken,
+  requireEmailVerification,
   requireAdmin,
 };

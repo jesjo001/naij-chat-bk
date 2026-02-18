@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { PersonalityService } from '../services/PersonalityService';
-import { logger } from '../utils/logger';
+import { PersonalityService } from '../services/PersonalityService.js';
+import { logger } from '../utils/logger.js';
 
 export class PersonalityController {
   private personalityService: PersonalityService;
