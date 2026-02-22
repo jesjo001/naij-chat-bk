@@ -3,21 +3,21 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install all dependencies (including dev dependencies for TypeScript build)
-COPY package*.json ./
-RUN npm ci
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
 
 # Copy source and build
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build
+RUN yarn build
 
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
 # Install production dependencies only
-COPY package*.json ./
-RUN npm ci --omit=dev
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --production
 
 # Copy built app from builder stage
 COPY --from=builder /app/dist ./dist
