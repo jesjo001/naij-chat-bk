@@ -76,6 +76,7 @@ const sendViaMailbridge = async (options: InternalMailOptions) => {
   );
 
   if (!response.data.success) {
+    console.log('Mailbridge API error:', response);
     throw new Error(`Mailbridge API error: ${JSON.stringify(response.data)}`);
   }
 
@@ -106,6 +107,7 @@ const sendMail = async (options: InternalMailOptions) => {
       logger.info('Email sent successfully via Mailbridge API', { to: mailOptions.to, subject: mailOptions.subject });
       return;
     } catch (error: any) {
+      console.log('Mailbridge API failed - falling back to SMTP', error);
       logger.warn('Mailbridge API failed - falling back to SMTP', { error: error.message, to: mailOptions.to });
     }
   }
@@ -115,6 +117,7 @@ const sendMail = async (options: InternalMailOptions) => {
     await sendViaSMTP(mailOptions);
     logger.info('Email sent successfully via SMTP fallback', { to: mailOptions.to, subject: mailOptions.subject });
   } catch (error: any) {
+      console.log('SMTP fallback failed', error);
     logger.error('Failed to send email via SMTP fallback', { error: error.message, to: mailOptions.to });
     throw error;
   }
