@@ -294,47 +294,74 @@ The NaijaGPT Team
   `.trim();
 
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 600px; margin: 0 auto;">
-      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to NaijaGPT! 🎉</h1>
-      </div>
+    <div style="margin: 0; padding: 24px 0; background-color: #f3f4f6; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; color: #111827;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
+        <tr>
+          <td align="center" style="padding: 0 16px;">
+            <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width: 100%; max-width: 600px; border-collapse: collapse; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;">
+              <tr>
+                <td align="center" style="padding: 28px 24px; background-color: #1e3a8a;">
+                  <h1 style="margin: 0; color: #ffffff; font-size: 26px; line-height: 1.3; font-weight: 700;">Verify your email address</h1>
+                  <p style="margin: 10px 0 0; color: #dbeafe; font-size: 14px; line-height: 1.5;">Welcome to NaijaGPT</p>
+                </td>
+              </tr>
 
-      <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-        <p style="font-size: 16px; margin: 0 0 20px;">Hello <strong>${payload.name}</strong>,</p>
-        
-        <p style="font-size: 16px; margin: 0 0 20px;">
-          Thank you for signing up! To complete your registration and start using NaijaGPT, please verify your email address.
-        </p>
+              <tr>
+                <td style="padding: 30px 28px 12px;">
+                  <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.6;">Hello <strong>${payload.name}</strong>,</p>
+                  <p style="margin: 0; font-size: 16px; line-height: 1.6; color: #374151;">
+                    Thanks for signing up. Confirm your email address to activate your NaijaGPT account and continue securely.
+                  </p>
+                </td>
+              </tr>
 
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${payload.verificationUrl}" 
-             style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                    color: white; 
-                    padding: 14px 32px; 
-                    text-decoration: none; 
-                    border-radius: 6px; 
-                    font-weight: 600;
-                    font-size: 16px;
-                    display: inline-block;
-                    box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);">
-            Verify Email Address
-          </a>
-        </div>
+              <tr>
+                <td align="center" style="padding: 26px 28px 18px;">
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse: separate;">
+                    <tr>
+                      <td align="center" bgcolor="#e0e7ff" style="border-radius: 8px; border: 1px solid #1e3a8a;">
+                        <a href="${payload.verificationUrl}" target="_blank" style="display: inline-block; padding: 14px 30px; font-size: 16px; font-weight: 700; line-height: 1; color: #1e3a8a !important; text-decoration: none; border-radius: 8px; background-color: #e0e7ff; border: 1px solid #1e3a8a; mso-padding-alt: 0; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;">
+                          <span style="color: #1e3a8a !important; text-decoration: none;">Verify Email Address</span>
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
 
-        <div style="background: #f9fafb; padding: 15px; border-radius: 6px; margin: 20px 0;">
-          <p style="margin: 0; font-size: 14px; color: #6b7280;">
-            <strong>Note:</strong> This verification link will expire in 24 hours.
-          </p>
-        </div>
+              <tr>
+                <td style="padding: 0 28px 20px;">
+                  <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #6b7280;">
+                    If the button doesn't work, copy and paste this link into your browser:
+                  </p>
+                  <p style="margin: 6px 0 0; word-break: break-all; font-size: 13px; line-height: 1.7; color: #2563eb;">
+                    <a href="${payload.verificationUrl}" target="_blank" style="color: #2563eb; text-decoration: underline;">${payload.verificationUrl}</a>
+                  </p>
+                </td>
+              </tr>
 
-        <p style="font-size: 14px; color: #6b7280; margin: 20px 0 0;">
-          If you didn't create an account, you can safely ignore this email.
-        </p>
-      </div>
+              <tr>
+                <td style="padding: 0 28px 26px;">
+                  <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px;">
+                    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #4b5563;"><strong>Security note:</strong> This verification link expires in 24 hours.</p>
+                  </div>
+                  <p style="margin: 16px 0 0; font-size: 13px; line-height: 1.6; color: #6b7280;">
+                    If you did not create a NaijaGPT account, you can safely ignore this email.
+                  </p>
+                </td>
+              </tr>
+            </table>
 
-      <div style="text-align: center; margin-top: 20px; padding: 20px; color: #9ca3af; font-size: 12px;">
-        <p style="margin: 5px 0;">© ${new Date().getFullYear()} NaijaGPT. All rights reserved.</p>
-      </div>
+            <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width: 100%; max-width: 600px; border-collapse: collapse;">
+              <tr>
+                <td align="center" style="padding: 14px 12px 0; font-size: 12px; color: #9ca3af; line-height: 1.6;">
+                  © ${new Date().getFullYear()} NaijaGPT. All rights reserved.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     </div>
   `;
 
