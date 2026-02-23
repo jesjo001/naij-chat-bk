@@ -1,5 +1,9 @@
 import nodemailer from 'nodemailer';
+import axios from 'axios';
 import { logger } from './logger.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 export type PaymentEmailStatus = 'pending' | 'successful' | 'failed';
 
@@ -42,15 +46,86 @@ const formatCurrency = (amount: number, currency: string) =>
     maximumFractionDigits: 0,
   }).format(amount);
 
+interface InternalMailOptions {
+  to: string;
+  subject: string;
+  text?: string;
+  html?: string;
+  from?: string;
+}
+
+const sendViaMailbridge = async (options: InternalMailOptions) => {
+  const apiKey = process.env.API_MAIL_KEY;
+  if (!apiKey) throw new Error('API_MAIL_KEY not configured');
+
+  const response = await axios.post(
+    'https://api.mailbridge.dev/v1/messages/send',
+    {
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      from: options.from,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.data.success) {
+    throw new Error(`Mailbridge API error: ${JSON.stringify(response.data)}`);
+  }
+
+  return response.data;
+};
+
+const sendViaSMTP = async (options: InternalMailOptions) => {
+  const transporter = buildTransporter();
+  if (!transporter) throw new Error('SMTP transporter not configured (missing host/user/pass)');
+
+  return transporter.sendMail({
+    from: options.from,
+    to: options.to,
+    subject: options.subject,
+    text: options.text,
+    html: options.html,
+  });
+};
+
+const sendMail = async (options: InternalMailOptions) => {
+  const defaultFrom = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
+  const mailOptions = { ...options, from: options.from || defaultFrom };
+
+  // Try Mailbridge API first if API key is present
+  if (process.env.API_MAIL_KEY) {
+    try {
+      await sendViaMailbridge(mailOptions);
+      logger.info('Email sent successfully via Mailbridge API', { to: mailOptions.to, subject: mailOptions.subject });
+      return;
+    } catch (error: any) {
+      logger.warn('Mailbridge API failed - falling back to SMTP', { error: error.message, to: mailOptions.to });
+    }
+  }
+
+  // Fallback to SMTP
+  try {
+    await sendViaSMTP(mailOptions);
+    logger.info('Email sent successfully via SMTP fallback', { to: mailOptions.to, subject: mailOptions.subject });
+  } catch (error: any) {
+    logger.error('Failed to send email via SMTP fallback', { error: error.message, to: mailOptions.to });
+    throw error;
+  }
+};
+
 export const sendPaymentStatusEmail = async (payload: PaymentEmailPayload) => {
   const to = process.env.PAYMENT_ALERT_EMAIL;
   if (!to) {
     logger.warn('PAYMENT_ALERT_EMAIL not configured - skipping payment email');
     return;
   }
-
-  const transporter = buildTransporter();
-  if (!transporter) return;
 
   const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
   const subject = `Payment ${payload.status.toUpperCase()} · ${payload.subscriptionTier}`;
@@ -78,20 +153,20 @@ export const sendPaymentStatusEmail = async (payload: PaymentEmailPayload) => {
   `;
 
   try {
-    await transporter.sendMail({
+    await sendMail({
       from,
       to,
       subject,
       text,
       html,
     });
-    logger.info('Payment status email sent', {
+    logger.info('Payment status email request processed', {
       status: payload.status,
       transactionRef: payload.transactionRef,
       to,
     });
   } catch (error) {
-    logger.error('Failed to send payment status email', { error });
+    logger.error('Failed to process payment status email request', { error });
   }
 };
 
@@ -107,12 +182,6 @@ export const sendEnterpriseInquiryEmail = async (payload: EnterpriseInquiryPaylo
   const to = process.env.PAYMENT_ALERT_EMAIL || 'cov_dove@yahoo.com';
   if (!to) {
     logger.warn('Enterprise inquiry email recipient not configured');
-    return;
-  }
-
-  const transporter = buildTransporter();
-  if (!transporter) {
-    logger.warn('Mail transporter not available - cannot send enterprise inquiry email');
     return;
   }
 
@@ -182,18 +251,14 @@ ${payload.message}
   `;
 
   try {
-    await transporter.sendMail({
+    await sendMail({
       from,
       to,
-      replyTo: payload.email,
       subject,
       text,
       html,
     });
-    logger.info('Enterprise inquiry email sent', {
-      inquiryId: payload.inquiryId,
-      to,
-    });
+    logger.info('Enterprise inquiry email sent successfully', { inquiryId: payload.inquiryId, to });
   } catch (error) {
     logger.error('Failed to send enterprise inquiry email', { error });
     throw error;
@@ -207,12 +272,6 @@ export interface VerificationEmailPayload {
 }
 
 export const sendVerificationEmail = async (payload: VerificationEmailPayload) => {
-  const transporter = buildTransporter();
-  if (!transporter) {
-    logger.warn('Mail transporter not available - cannot send verification email');
-    return;
-  }
-
   const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
   const subject = 'Verify Your Email - NaijaGPT';
 
@@ -277,14 +336,14 @@ The NaijaGPT Team
   `;
 
   try {
-    await transporter.sendMail({
+    await sendMail({
       from,
       to: payload.email,
       subject,
       text,
       html,
     });
-    logger.info('Verification email sent', { email: payload.email });
+    logger.info('Verification email sent successfully', { email: payload.email });
   } catch (error) {
     logger.error('Failed to send verification email', { error, email: payload.email });
     throw error;
@@ -298,12 +357,6 @@ export interface PasswordResetEmailPayload {
 }
 
 export const sendPasswordResetEmail = async (payload: PasswordResetEmailPayload) => {
-  const transporter = buildTransporter();
-  if (!transporter) {
-    logger.warn('Mail transporter not available - cannot send password reset email');
-    return;
-  }
-
   const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
   const subject = 'Reset Your Password - NaijaGPT';
 
@@ -371,14 +424,14 @@ The NaijaGPT Team
   `;
 
   try {
-    await transporter.sendMail({
+    await sendMail({
       from,
       to: payload.email,
       subject,
       text,
       html,
     });
-    logger.info('Password reset email sent', { email: payload.email });
+    logger.info('Password reset email sent successfully', { email: payload.email });
   } catch (error) {
     logger.error('Failed to send password reset email', { error, email: payload.email });
     throw error;
