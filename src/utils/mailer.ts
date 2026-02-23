@@ -59,7 +59,7 @@ const sendViaMailbridge = async (options: InternalMailOptions) => {
   if (!apiKey) throw new Error('API_MAIL_KEY not configured');
 
   const response = await axios.post(
-    'https://api.mailbridge.dev/v1/messages/send',
+    'https://mailserver.automationlounge.com/api/v1/messages/send',
     {
       to: options.to,
       subject: options.subject,
