@@ -556,6 +556,7 @@ export class AuthController {
         message: 'Verification email sent successfully',
       });
     } catch (error) {
+      console.log('Resend verification error:', error);
       logger.error('Resend verification error:', error);
       res.status(500).json({
         success: false,
