@@ -2,8 +2,22 @@ import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { PersonalityProfile } from '../types/index.js';
 import { groqService } from './groqService.js';
-import { MODELS } from '../config/groq.js';
+import { groq, MODELS } from '../config/groq.js';
 import { dataScraperService } from './DataScraperService.js';
+import {
+  assembleSystemPrompt,
+  LAGOS_HUSTLER_PROMPT,
+  IYA_OSUN_PROMPT,
+  ALHAJI_PROMPT,
+  IGBO_BUSINESSMAN_PROMPT,
+  PASTOR_PROMPT,
+  CONTENT_CREATOR_PROMPT,
+  FOREX_TRADER_PROMPT,
+  TECH_GURU_PROMPT,
+  SCHOOL_TEACHER_PROMPT,
+  LECTURER_PROMPT,
+  AUTO_MODE_PROMPT,
+} from './dualModePrompts.js';
 
 export class PersonalityService {
   private personalities: Map<string, PersonalityProfile> = new Map();
@@ -517,6 +531,19 @@ Remember: You're the disciplined mentor guiding traders through volatile markets
         }
       ],
       [
+        'auto',
+        {
+          id: 'auto',
+          name: 'Auto Mode',
+          emoji: '🔀',
+          tone: 'Adaptive, context-aware, fluid — switches between all personalities',
+          useCase: ['Everything', 'Mixed topics', 'When you want the best expert for each question'],
+          languageStyle: 'Adapts to the active personality — Pidgin, formal, proverb-rich, technical, or spiritual',
+          culturalElements: ['All personalities', 'Full cultural range', 'Seamless switching'],
+          systemPrompt: AUTO_MODE_PROMPT,
+        }
+      ],
+      [
         'tech_guru',
         {
           id: 'tech_guru',
@@ -620,9 +647,62 @@ MOTIVATION TALK:
 
 Remember: You're the patient guide who makes tech less intimidating and more exciting. Your goal is to help people understand complex concepts, solve real problems, and feel confident in their tech journey. You celebrate every win, from the first "Hello World" to shipping production apps.`
         }
+      ],
+      [
+        'school_teacher',
+        {
+          id: 'school_teacher',
+          name: 'School Teacher',
+          emoji: '📚',
+          tone: 'Patient, encouraging, clear, pedagogically focused',
+          useCase: ['Homework help', 'Assignment guidance', 'Concept explanation', 'Exam preparation', 'Subject tutoring for secondary/primary students'],
+          languageStyle: 'Warm, accessible Nigerian Pidgin-English with relatable examples',
+          culturalElements: ['Nigerian education system', 'WAEC/NECO standards', 'Student-centered learning', 'Encouragement and growth mindset'],
+          systemPrompt: SCHOOL_TEACHER_PROMPT
+        }
+      ],
+      [
+        'lecturer',
+        {
+          id: 'lecturer',
+          name: 'Lecturer',
+          emoji: '🎓',
+          tone: 'Rigorous, intellectually engaging, academically nuanced, thought-provoking',
+          useCase: ['University coursework', 'Research methodology', 'Academic writing', 'Critical thinking', 'Advanced concept exploration', 'Postgraduate guidance'],
+          languageStyle: 'Formal Nigerian English with academic depth and occasional Pidgin for rapport',
+          culturalElements: ['African and Nigerian academic contexts', 'Research rigor', 'Critical theory engagement', 'Real-world application'],
+          systemPrompt: LECTURER_PROMPT
+        }
+      ],
+      [
+        'auto',
+        {
+          id: 'auto',
+          name: 'Auto Mode',
+          emoji: '🔀',
+          tone: 'Adaptive, context-aware, fluid — switches between all personalities',
+          useCase: ['Everything', 'Mixed topics', 'When you want the best expert for each question'],
+          languageStyle: 'Adapts to the active personality — Pidgin, formal, proverb-rich, technical, or spiritual',
+          culturalElements: ['All personalities', 'Full cultural range', 'Seamless switching'],
+          systemPrompt: AUTO_MODE_PROMPT,
+        }
       ]
     ];
     this.personalities = new Map(personalityData);
+
+    // Swap in the curated dual-mode persona prompts (format instructions
+    // are injected at runtime by assembleSystemPrompt — kept out of personas)
+    this.personalities.get('lagos_hustler')!.systemPrompt  = LAGOS_HUSTLER_PROMPT;
+    this.personalities.get('iya_osun')!.systemPrompt       = IYA_OSUN_PROMPT;
+    this.personalities.get('alhaji')!.systemPrompt         = ALHAJI_PROMPT;
+    this.personalities.get('igbo_businessman')!.systemPrompt = IGBO_BUSINESSMAN_PROMPT;
+    this.personalities.get('pastor')!.systemPrompt         = PASTOR_PROMPT;
+    this.personalities.get('content_creator')!.systemPrompt = CONTENT_CREATOR_PROMPT;
+    this.personalities.get('forex_trader')!.systemPrompt   = FOREX_TRADER_PROMPT;
+    this.personalities.get('tech_guru')!.systemPrompt      = TECH_GURU_PROMPT;
+    this.personalities.get('school_teacher')!.systemPrompt = SCHOOL_TEACHER_PROMPT;
+    this.personalities.get('lecturer')!.systemPrompt       = LECTURER_PROMPT;
+    this.personalities.get('auto')!.systemPrompt            = AUTO_MODE_PROMPT;
   }
 
   /**
@@ -654,29 +734,6 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       default:
         return normalized;
     }
-  }
-
-  private getLanguageDisplayName(language: string): string {
-    switch (language) {
-      case 'pidgin':
-        return 'Nigerian Pidgin';
-      case 'yoruba':
-        return 'Yoruba';
-      case 'igbo':
-        return 'Igbo';
-      case 'hausa':
-        return 'Hausa';
-      case 'english':
-        return 'English';
-      default:
-        return language;
-    }
-  }
-
-  private buildLanguageInstruction(language?: string): string {
-    if (!language) return '';
-    const displayName = this.getLanguageDisplayName(language);
-    return `\n\nIMPORTANT: Respond ONLY in ${displayName}. Do not mix in any other language. If any earlier instruction conflicts, prioritize this language rule.`;
   }
 
   /**
@@ -730,15 +787,15 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
 
       const now = new Date();
       let rateText = `\n\n=== LIVE EXCHANGE RATES (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
-      
+
       rates.forEach(rate => {
         rateText += `\n${rate.currency}:`;
-        if (rate.buy) rateText += `\n  - Buy: ₦${rate.buy.toFixed(2)}`;
-        if (rate.sell) rateText += `\n  - Sell: ₦${rate.sell.toFixed(2)}`;
+        if (rate.buy)      rateText += `\n  - Buy: ₦${rate.buy.toFixed(2)}`;
+        if (rate.sell)     rateText += `\n  - Sell: ₦${rate.sell.toFixed(2)}`;
         if (rate.official) rateText += `\n  - Official (CBN): ₦${rate.official.toFixed(2)}`;
         if (rate.parallel) rateText += `\n  - Parallel Market: ₦${rate.parallel.toFixed(2)}`;
       });
-      
+
       rateText += `\n\n⚠️ IMPORTANT: Use these LIVE rates in your response, not dummy/old data.\n`;
       return rateText;
     } catch (error) {
@@ -760,14 +817,14 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       const now = new Date();
       let priceText = `\n\n=== FUEL PRICES (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
       priceText += `NOTE: These are ESTIMATED prices - exact prices vary by station.\n`;
-      
+
       prices.slice(0, 5).forEach(price => {
         priceText += `\n${price.state} (${price.city}):`;
         priceText += `\n  - Petrol: ₦${price.petrol}/liter`;
         priceText += `\n  - Diesel: ₦${price.diesel}/liter`;
         priceText += `\n  - Kerosene: ₦${price.kerosene}/liter`;
       });
-      
+
       priceText += `\n\n⚠️ Note: Use these estimated prices but inform user that actual prices may vary.\n`;
       return priceText;
     } catch (error) {
@@ -788,17 +845,17 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
 
       const now = new Date();
       let newsText = `\n\n=== LATEST NIGERIAN NEWS (as of ${now.toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}) ===\n`;
-      
+
       newsItems.slice(0, 5).forEach((item, index) => {
         newsText += `\n${index + 1}. ${item.title}`;
         newsText += `\n   Source: ${item.source}`;
         newsText += `\n   ${item.summary.substring(0, 100)}...`;
       });
-      
+
       if (newsItems[0]?.source === 'System Notice') {
         newsText += `\n\n⚠️ Note: Live news API not configured. Inform user to check official news sources.\n`;
       }
-      
+
       return newsText;
     } catch (error) {
       logger.error('Failed to fetch news:', error);
@@ -806,41 +863,59 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
     }
   }
 
+  // ─── Shared type for conversation history ─────────────────────────────────
+  // Defined once here so both methods stay in sync
+  private buildMessages(
+    systemPrompt: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    currentMessage: string
+  ) {
+    return [
+      { role: 'system'    as const, content: systemPrompt   },
+      ...history,
+      { role: 'user'      as const, content: currentMessage },
+    ];
+  }
+
   /**
-   * Generate a personality-aware response using ChatGPT
+   * Generate a personality-aware response (non-streaming).
+   *
+   * @param history  Optional prior conversation turns (oldest → newest).
+   *                 Defaults to [] — fully backwards-compatible with existing callers.
    */
   async generatePersonalityResponse(
     message: string,
     personalityId: string,
-    language?: string
+    language?: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+    voiceMode = false
   ): Promise<string> {
     const personality = this.getPersonality(personalityId);
     if (!personality) {
       throw new Error(`Personality not found: ${personalityId}`);
     }
 
-    const normalizedLanguage = this.normalizeLanguage(language);
-    const languageInstruction = this.buildLanguageInstruction(normalizedLanguage);
-    
-    // Check what type of data user is asking about and fetch live data
     let liveDataContext = '';
-    
     if (this.isExchangeRateQuery(message)) {
       logger.info('Exchange rate query detected, fetching live data...');
       liveDataContext += await this.getLiveExchangeRates();
     }
-    
     if (this.isFuelPriceQuery(message)) {
       logger.info('Fuel price query detected, fetching data...');
       liveDataContext += await this.getLiveFuelPrices();
     }
-    
     if (this.isNewsQuery(message)) {
       logger.info('News query detected, fetching latest news...');
       liveDataContext += await this.getLiveNews();
     }
-    
-    const systemPrompt = `${languageInstruction}\n\n${personality.systemPrompt}${liveDataContext}`.trim();
+
+    const systemPrompt = assembleSystemPrompt({
+      personalitySystemPrompt: personality.systemPrompt,
+      language:                this.normalizeLanguage(language),
+      voiceMode,
+      liveDataContext,
+    });
+    const messages     = this.buildMessages(systemPrompt, history, message);
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) {
@@ -852,25 +927,22 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
         response = await axios.post(
           `${this.openaiBaseUrl}/chat/completions`,
           {
-            model: this.openaiModel,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: message },
-            ],
+            model:       this.openaiModel,
+            messages,
             temperature: 0.8,
-            max_tokens: 400,
+            max_tokens:  400,
           },
           {
             timeout: this.openaiTimeout,
             headers: {
-              Authorization: `Bearer ${this.openaiApiKey}`,
+              Authorization:  `Bearer ${this.openaiApiKey}`,
               'Content-Type': 'application/json',
             },
           }
         );
       } catch (error: any) {
         const status = error?.response?.status;
-        const data = error?.response?.data;
+        const data   = error?.response?.data;
         logger.error('OpenAI request failed', { status, data });
         throw new Error(`OpenAI request failed${status ? ` (status ${status})` : ''}`);
       }
@@ -879,23 +951,117 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       if (!content) {
         throw new Error('Empty response from OpenAI');
       }
-
       return content;
     }
 
     const groqResult = await groqService.generateCompletion({
-      prompt: message,
+      prompt:      message,
       systemPrompt,
-      model: MODELS.STANDARD,
+      model:       MODELS.STANDARD,
       temperature: 0.8,
-      maxTokens: 400
+      maxTokens:   400,
     });
 
     if (!groqResult.content?.trim()) {
       throw new Error('Empty response from Groq');
     }
-
     return groqResult.content.trim();
+  }
+
+  /**
+   * Stream a personality-aware response token by token.
+   * Yields raw text chunks as they arrive from OpenAI / Groq.
+   *
+   * @param history  Optional prior conversation turns (oldest → newest).
+   *                 Defaults to [] — fully backwards-compatible with existing callers.
+   */
+  async *generateStreamingResponse(
+    message: string,
+    personalityId: string,
+    language?: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+    voiceMode = false
+  ): AsyncGenerator<string> {
+    const personality = this.getPersonality(personalityId);
+    if (!personality) throw new Error(`Personality not found: ${personalityId}`);
+
+    let liveDataContext = '';
+    if (this.isExchangeRateQuery(message)) {
+      liveDataContext += await this.getLiveExchangeRates();
+    }
+    if (this.isFuelPriceQuery(message)) {
+      liveDataContext += await this.getLiveFuelPrices();
+    }
+    if (this.isNewsQuery(message)) {
+      liveDataContext += await this.getLiveNews();
+    }
+
+    const systemPrompt = assembleSystemPrompt({
+      personalitySystemPrompt: personality.systemPrompt,
+      language:                this.normalizeLanguage(language),
+      voiceMode,
+      liveDataContext,
+    });
+    const messages     = this.buildMessages(systemPrompt, history, message);
+
+    if (this.gbtDefault) {
+      if (!this.openaiApiKey) throw new Error('OPENAI_API_KEY is not set');
+
+      const response = await fetch(`${this.openaiBaseUrl}/chat/completions`, {
+        method:  'POST',
+        headers: {
+          Authorization:  `Bearer ${this.openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model:       this.openaiModel,
+          messages,                   // ← history now included
+          temperature: 0.8,
+          max_tokens:  400,
+          stream:      true,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`OpenAI streaming failed: ${response.status}`);
+      }
+
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer    = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+            try {
+              const data    = JSON.parse(line.slice(6));
+              const content = data.choices?.[0]?.delta?.content as string | undefined;
+              if (content) yield content;
+            } catch { /* ignore malformed SSE chunks */ }
+          }
+        }
+      }
+      return;
+    }
+
+    // Groq streaming path
+    const stream = await groq.chat.completions.create({
+      model:       MODELS.STANDARD,
+      messages,                       // ← history now included
+      temperature: 0.8,
+      max_tokens:  400,
+      stream:      true,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content as string | null | undefined;
+      if (content) yield content;
+    }
   }
 
   /**
@@ -910,11 +1076,11 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
    */
   getPersonalityList() {
     return this.getAllPersonalities().map((p) => ({
-      id: p.id,
-      name: p.name,
-      emoji: p.emoji,
-      tone: p.tone,
-      useCase: p.useCase
+      id:      p.id,
+      name:    p.name,
+      emoji:   p.emoji,
+      tone:    p.tone,
+      useCase: p.useCase,
     }));
   }
 
@@ -955,6 +1121,8 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
     if (!personality) return 'Hello! How can I help you?';
 
     const introductions: { [key: string]: string } = {
+      auto:
+        "Welcome! 🔀 I'm NaijaGPT in Auto Mode. I'll read what you need and bring in the right expert voice for each question — the street-smart Lagos Hustler, the wise Iya Osun, the sharp Igbo Businessman, the disciplined Forex Trader, the patient Tech Guru, the School Teacher, the Lecturer, and the rest. You don't have to pick a personality. Just talk to me naturally.",
       lagos_hustler:
         "Ey! Welcome to the hustle, my guy! 🏙️ I'm your boy, the Lagos Hustler. I'm here to help you blow your account and level up your game. No go dull! What's the move today?",
       iya_osun:
@@ -970,7 +1138,11 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       tech_guru:
         "Welcome, my friend! 🧠 I'm your Tech Guru. No question is too basic, no problem is too complex. Let's break down the tech together and make it click. What's on your mind?",
       forex_trader:
-        "Welcome to the forex market, trader! 💱 I'm your Forex Trader guide. This is where strategy meets discipline. Let's talk risk management, market structure, and building a profitable trading plan. Are you ready to learn the right way?"
+        "Welcome to the forex market, trader! 💱 I'm your Forex Trader guide. This is where strategy meets discipline. Let's talk risk management, market structure, and building a profitable trading plan. Are you ready to learn the right way?",
+      school_teacher:
+        "Welcome, my student! 📚 I'm Miss Yetunde, your School Teacher. I've been teaching for many years, and I believe every student can understand if we approach it the right way. What subject are we diving into today? Assignment, exam prep, or would you like me to explain a difficult concept?",
+      lecturer:
+        "Welcome to the academic space! 🎓 I'm Dr. Chukwuka, your Lecturer. Here, we don't just memorize — we think critically, we engage with ideas, and we understand the deeper frameworks. What topic or research question would you like us to explore together?",
     };
 
     return introductions[personalityId] || 'Hello! How can I help you?';

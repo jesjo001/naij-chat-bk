@@ -2,163 +2,172 @@ import { Request, Response } from 'express';
 import { logger } from '../utils/logger.js';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const TTS_TIMEOUT_MS = 20_000; // ✅ NEW: Hard timeout on TTS requests
 
 /**
  * Preprocess Pidgin text for smoother TTS pronunciation.
- * OpenAI TTS reads Pidgin literally as English — these hints
- * help it pronounce common Pidgin words more naturally.
  */
 function preprocessPidginText(text: string): string {
-  // Common Pidgin contractions & pronunciation hints
   const replacements: [RegExp, string][] = [
-    // Common words that TTS mispronounces
-    [/\bwetin\b/gi, 'wettin'],
-    [/\bdem\b/gi, 'dem'],
-    [/\buna\b/gi, 'oona'],
-    [/\bshey\b/gi, 'shay'],
-    [/\babi\b/gi, 'ah-bee'],
-    [/\bwahala\b/gi, 'wah-hah-lah'],
-    [/\bpalaver\b/gi, 'pah-lah-vah'],
-    [/\bnaim\b/gi, 'nah-eem'],
-    [/\bna\s+im\b/gi, 'nah-eem'],
-    [/\bno be\b/gi, 'no bee'],
-    [/\bdey\b/gi, 'day'],
-    [/\bpikin\b/gi, 'pee-keen'],
-    [/\bchop\b/gi, 'chop'],
-    [/\bsabi\b/gi, 'sah-bee'],
-    [/\bwaka\b/gi, 'wah-kah'],
-    [/\bowe\b/gi, 'oh-way'],
-    [/\boya\b/gi, 'oh-yah'],
-    [/\bsha\b/gi, 'shah'],
-    [/\bsef\b/gi, 'sef'],
-    [/\bjare\b/gi, 'jah-ray'],
-    [/\bkomot\b/gi, 'koh-mot'],
-    [/\byarns\b/gi, 'yahns'],
-    [/\bgist\b/gi, 'geest'],
-    [/\bnaija\b/gi, 'nai-jah'],
-    [/\bbroda\b/gi, 'bro-dah'],
-    [/\bsista\b/gi, 'sis-tah'],
-    [/\bmake\s+we\b/gi, 'mah-keh weh'],
-    [/\bHow far\b/gi, 'How fah'],
-    [/\bI no know\b/gi, 'I no noh'],
+    [/\bwetin\b/gi,      'wettin'],
+    [/\buna\b/gi,        'oona'],
+    [/\bshey\b/gi,       'shay'],
+    [/\babi\b/gi,        'ah-bee'],
+    [/\bwahala\b/gi,     'wah-hah-lah'],
+    [/\bpalaver\b/gi,    'pah-lah-vah'],
+    [/\bnaim\b/gi,       'nah-eem'],
+    [/\bna\s+im\b/gi,    'nah-eem'],
+    [/\bno be\b/gi,      'no bee'],
+    [/\bdey\b/gi,        'day'],
+    [/\bpikin\b/gi,      'pee-keen'],
+    [/\bsabi\b/gi,       'sah-bee'],
+    [/\bwaka\b/gi,       'wah-kah'],
+    [/\boya\b/gi,        'oh-yah'],
+    [/\bsha\b/gi,        'shah'],
+    [/\bsef\b/gi,        'sef'],
+    [/\bjare\b/gi,       'jah-ray'],
+    [/\bkomot\b/gi,      'koh-mot'],
+    [/\bgist\b/gi,       'geest'],
+    [/\bnaija\b/gi,      'nai-jah'],
+    [/\bbroda\b/gi,      'bro-dah'],
+    [/\bsista\b/gi,      'sis-tah'],
+    [/\bmake\s+we\b/gi,  'mah-keh weh'],
+    [/\bHow far\b/gi,    'How fah'],
   ];
 
-  let processed = text;
-  for (const [pattern, replacement] of replacements) {
-    processed = processed.replace(pattern, replacement);
-  }
-  return processed;
+  return replacements.reduce(
+    (acc, [pattern, replacement]) => acc.replace(pattern, replacement),
+    text,
+  );
 }
+
+// ─── Voice & speed maps ───────────────────────────────────────
+const VOICE_MAP: Record<string, string> = {
+  english: 'nova',
+  pidgin:  'nova',
+  yoruba:  'shimmer',
+  igbo:    'nova',
+  hausa:   'shimmer',
+  en:      'nova',
+  pcm:     'nova',
+  yo:      'shimmer',
+  ig:      'nova',
+  ha:      'shimmer',
+};
+
+const SPEED_MAP: Record<string, number> = {
+  english: 1.05,
+  pidgin:  0.95,
+  yoruba:  0.92,
+  igbo:    0.92,
+  hausa:   0.92,
+};
+
+// Languages that benefit from the HD model
+const HD_LANGUAGES = new Set(['pidgin', 'yoruba', 'igbo', 'hausa', 'pcm', 'yo', 'ig', 'ha']);
 
 export class VoiceController {
   /**
    * POST /api/voice/synthesize
-   * Convert text to speech using OpenAI TTS
-   * - Uses tts-1-hd for Pidgin/Yoruba/Igbo/Hausa for better quality
-   * - Adjusts speed per language for natural feel
-   * - Preprocesses Pidgin text for smoother pronunciation
    */
   async synthesize(req: Request, res: Response) {
     try {
       const { text, language } = req.body;
       const userId = (req as any).userId as string;
 
-      if (!text) {
+      if (!text?.trim()) {
+        return res.status(400).json({ success: false, message: 'text is required' });
+      }
+
+      // ✅ Sanitise: cap text length to avoid accidental abuse / cost overruns
+      const MAX_TTS_LENGTH = 1500;
+      if (text.length > MAX_TTS_LENGTH) {
         return res.status(400).json({
           success: false,
-          message: 'Text is required',
+          message: `text exceeds maximum length of ${MAX_TTS_LENGTH} characters`,
         });
       }
 
       if (!OPENAI_API_KEY) {
         logger.error('OpenAI API key not configured');
-        return res.status(500).json({
-          success: false,
-          message: 'Voice service not configured',
-        });
+        return res.status(500).json({ success: false, message: 'Voice service not configured' });
       }
 
-      // Voice selection (professional female voices)
-      const voiceMap: Record<string, string> = {
-        'english': 'nova',
-        'pidgin':  'nova',
-        'yoruba':  'shimmer',
-        'igbo':    'nova',
-        'hausa':   'shimmer',
-        'en':      'nova',
-        'pcm':     'nova',
-        'yo':      'shimmer',
-        'ig':      'nova',
-        'ha':      'shimmer',
-      };
+      const langLower    = (language || 'english').toLowerCase().trim();
+      const model        = HD_LANGUAGES.has(langLower) ? 'tts-1-hd' : 'tts-1';
+      const voice        = VOICE_MAP[langLower]  ?? 'nova';
+      const speed        = SPEED_MAP[langLower]  ?? 1.0;
 
-      // Speed per language (slightly slower for non-English for clarity)
-      const speedMap: Record<string, number> = {
-        'english': 1.05,   // Slightly faster English
-        'pidgin':  0.95,   // Slightly slower for Pidgin clarity
-        'yoruba':  0.92,
-        'igbo':    0.92,
-        'hausa':   0.92,
-      };
-
-      // Use HD model for Nigerian languages (better pronunciation)
-      const langLower = (language || 'english').toLowerCase();
-      const useHD = ['pidgin', 'yoruba', 'igbo', 'hausa', 'pcm', 'yo', 'ig', 'ha'].includes(langLower);
-      const model = useHD ? 'tts-1-hd' : 'tts-1';
-      const voice = voiceMap[langLower] || 'nova';
-      const speed = speedMap[langLower] || 1.0;
-
-      // Preprocess Pidgin text for smoother pronunciation
-      let processedText = text;
+      let processedText = text.trim();
       if (langLower === 'pidgin' || langLower === 'pcm') {
-        processedText = preprocessPidginText(text);
+        processedText = preprocessPidginText(processedText);
       }
 
-      logger.info(`TTS: user=${userId}, lang=${langLower}, voice=${voice}, model=${model}, speed=${speed}, len=${processedText.length}`);
+      logger.info(`TTS: user=${userId} lang=${langLower} voice=${voice} model=${model} speed=${speed} len=${processedText.length}`);
 
-      // Call OpenAI TTS API
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          voice,
-          input: processedText,
-          speed,
-          response_format: 'mp3',
-        }),
-      });
+      // ✅ FIX: AbortController for hard timeout on the upstream TTS call
+      const controller = new AbortController();
+      const timeout    = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
 
-      if (!response.ok) {
-        const error = await response.text();
-        logger.error('OpenAI TTS API error:', error);
-        return res.status(response.status).json({
-          success: false,
-          message: 'Failed to synthesize speech',
+      let ttsResponse: globalThis.Response;
+      try {
+        ttsResponse = await fetch('https://api.openai.com/v1/audio/speech', {
+          method:  'POST',
+          headers: {
+            Authorization:  `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body:   JSON.stringify({ model, voice, input: processedText, speed, response_format: 'mp3' }),
+          signal: controller.signal,
         });
+      } finally {
+        clearTimeout(timeout);
       }
 
-      const audioBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(audioBuffer);
+      if (!ttsResponse.ok) {
+        const errText = await ttsResponse.text().catch(() => 'unknown');
+        logger.error(`OpenAI TTS API error: ${ttsResponse.status} – ${errText}`);
+        return res.status(502).json({ success: false, message: 'Failed to synthesize speech' });
+      }
 
-      logger.info(`TTS done: ${buffer.length} bytes`);
+      if (!ttsResponse.body) {
+        return res.status(502).json({ success: false, message: 'Empty TTS response body' });
+      }
 
+      // ✅ FIX: private, no-store — TTS is personalised content; never cache publicly
       res.set({
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': String(buffer.length),
-        'Cache-Control': 'public, max-age=3600',
+        'Content-Type':   'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control':  'private, no-store',
+        'X-Voice':        voice,
+        'X-Language':     langLower,
       });
 
-      res.send(buffer);
-    } catch (error) {
+      // Stream directly from OpenAI → client, no server buffering
+      const reader = (ttsResponse.body as any).getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!res.writableEnded) res.write(Buffer.from(value));
+        }
+      } catch (streamErr) {
+        // Client likely disconnected mid-stream
+        logger.warn('TTS stream interrupted:', streamErr);
+      } finally {
+        if (!res.writableEnded) res.end();
+      }
+
+      return;
+    } catch (error: unknown) {
+      if ((error as Error)?.name === 'AbortError') {
+        logger.error('TTS request timed out');
+        return res.status(504).json({ success: false, message: 'TTS service timed out' });
+      }
       logger.error('Voice synthesis error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to synthesize speech',
-      });
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Failed to synthesize speech' });
+      }
     }
   }
 }

@@ -135,6 +135,11 @@ app.use('/api', apiRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
+  // Pro-mailer verification
+  if (req.query.promailer_verify === '8dea13e78232dfac044bc1e1c5844497') {
+    return res.status(200).send('8dea13e78232dfac044bc1e1c5844497');
+  }
+  
   res.json({
     message: 'Naija Sabi Backend API',
     version: '2.0.0',

@@ -540,7 +540,7 @@ export class AuthController {
       });
 
       // Send verification email
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = process.env.FRONTEND_URL;
       const verificationUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
 
       await sendVerificationEmail({

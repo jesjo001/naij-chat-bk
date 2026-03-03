@@ -12,6 +12,12 @@ const chatController = new ChatController();
 router.post('/message', verifyToken, asyncHandler((req, res) => chatController.sendMessage(req, res)));
 
 /**
+ * POST /api/chat/stream
+ * Send a message and stream AI response via SSE
+ */
+router.post('/stream', verifyToken, (req, res) => chatController.streamMessage(req, res));
+
+/**
  * POST /api/chat/create
  * Create a new conversation
  */
