@@ -286,7 +286,7 @@ export class AgentController {
    * Increment agent usage count
    */
   incrementUsage = async (
-    req: IAuthRequest,
+    req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
