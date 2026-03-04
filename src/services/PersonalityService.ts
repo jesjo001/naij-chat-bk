@@ -796,7 +796,25 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
         if (rate.parallel) rateText += `\n  - Parallel Market: ₦${rate.parallel.toFixed(2)}`;
       });
 
-      rateText += `\n\n⚠️ IMPORTANT: Use these LIVE rates in your response, not dummy/old data.\n`;
+      rateText += `\n\n⚠️ IMPORTANT: Use these LIVE rates in your response, not dummy/old data.`;
+      rateText += `\n\n📋 FORMATTING INSTRUCTION FOR EXCHANGE RATE RESPONSES:`;
+      rateText += `\nWhen presenting exchange rates, you MUST format them clearly using markdown for readability:`;
+      rateText += `\n- Use a **header** like "💱 Dollar to Naira Exchange Rate" or similar`;
+      rateText += `\n- List each rate type on its **own line** with clear labels and bold values`;
+      rateText += `\n- Separate different rate categories (Official, Parallel/Black Market, Buy/Sell) with blank lines between them`;
+      rateText += `\n- Example format:`;
+      rateText += `\n`;
+      rateText += `\n  **🏦 Official Rate (CBN)**`;
+      rateText += `\n  ₦X,XXX.XX / $1`;
+      rateText += `\n`;
+      rateText += `\n  **💹 Parallel Market Rate**`;
+      rateText += `\n  Buy: ₦X,XXX.XX / $1`;
+      rateText += `\n  Sell: ₦X,XXX.XX / $1`;
+      rateText += `\n`;
+      rateText += `\n- Add a brief note about the spread or market trend if relevant`;
+      rateText += `\n- If multiple currencies are requested, list each currency under its own sub-header`;
+      rateText += `\n- Always use the Naira symbol ₦ and format numbers with commas for thousands`;
+      rateText += `\n- Keep the formatting clean and scannable — users want to quickly find the rate they need\n`;
       return rateText;
     } catch (error) {
       logger.error('Failed to fetch live exchange rates:', error);
@@ -916,6 +934,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       liveDataContext,
     });
     const messages     = this.buildMessages(systemPrompt, history, message);
+    const maxTokens    = liveDataContext.trim() ? 700 : 400;
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) {
@@ -930,7 +949,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
             model:       this.openaiModel,
             messages,
             temperature: 0.8,
-            max_tokens:  400,
+            max_tokens:  maxTokens,
           },
           {
             timeout: this.openaiTimeout,
@@ -959,7 +978,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       systemPrompt,
       model:       MODELS.STANDARD,
       temperature: 0.8,
-      maxTokens:   400,
+      maxTokens:   maxTokens,
     });
 
     if (!groqResult.content?.trim()) {
@@ -1003,6 +1022,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       liveDataContext,
     });
     const messages     = this.buildMessages(systemPrompt, history, message);
+    const maxTokens    = liveDataContext.trim() ? 700 : 400;
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) throw new Error('OPENAI_API_KEY is not set');
@@ -1017,7 +1037,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
           model:       this.openaiModel,
           messages,                   // ← history now included
           temperature: 0.8,
-          max_tokens:  400,
+          max_tokens:  maxTokens,
           stream:      true,
         }),
       });
@@ -1054,7 +1074,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       model:       MODELS.STANDARD,
       messages,                       // ← history now included
       temperature: 0.8,
-      max_tokens:  400,
+      max_tokens:  maxTokens,
       stream:      true,
     });
 

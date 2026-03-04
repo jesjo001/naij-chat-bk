@@ -13,6 +13,7 @@ import paymentRouter from './payment.js';
 import enterpriseRouter from './enterprise.js';
 import voiceRouter from './voice.js';
 import contactRouter from './contact.js';
+import agentRouter from './agents.js';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ router.use('/admin', adminRouter);
 router.use('/payment', paymentRouter);
 router.use('/voice', voiceRouter);
 router.use('/contact', contactRouter);
+router.use('/agents', agentRouter);
 router.use('/', enterpriseRouter);
 
 export default router;
