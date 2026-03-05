@@ -2,11 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import Agent, { IAgent } from '../models/Agent.js';
 import { logger } from '../utils/logger.js';
 
-interface AuthenticatedRequest extends Request {
-  user?: {
-    userId: string;
-    email: string;
-  };
+// User type added by auth middleware
+interface AuthUser {
+  userId: string;
+  email: string;
 }
 
 export class AgentController {
@@ -14,12 +13,13 @@ export class AgentController {
    * Get all agents for the current user
    */
   getUserAgents = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const userId = req.user?.userId;
+      const user = (req as any).user as AuthUser | undefined;
+      const userId = user?.userId;
       if (!userId) {
         res.status(401).json({
           success: false,
@@ -46,13 +46,14 @@ export class AgentController {
    * Get a specific agent by ID
    */
   getAgent = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
       const { id } = req.params;
-      const userId = req.user?.userId;
+      const user = (req as any).user as AuthUser | undefined;
+      const userId = user?.userId;
 
       logger.info(`Fetching agent: ${id}`);
       const agent = await Agent.findById(id);
@@ -89,12 +90,13 @@ export class AgentController {
    * Create a new agent
    */
   createAgent = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      const userId = req.user?.userId;
+      const user = (req as any).user as AuthUser | undefined;
+      const userId = user?.userId;
       if (!userId) {
         res.status(401).json({
           success: false,
@@ -144,13 +146,14 @@ export class AgentController {
    * Update an agent
    */
   updateAgent = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
       const { id } = req.params;
-      const userId = req.user?.userId;
+      const user = (req as any).user as AuthUser | undefined;
+      const userId = user?.userId;
 
       if (!userId) {
         res.status(401).json({
@@ -207,13 +210,14 @@ export class AgentController {
    * Delete an agent
    */
   deleteAgent = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
       const { id } = req.params;
-      const userId = req.user?.userId;
+      const user = (req as any).user as AuthUser | undefined;
+      const userId = user?.userId;
 
       if (!userId) {
         res.status(401).json({
@@ -286,7 +290,7 @@ export class AgentController {
    * Increment agent usage count
    */
   incrementUsage = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
