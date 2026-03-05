@@ -110,14 +110,15 @@ const VOICE_MAP: Record<string, string> = {
 
 const SPEED_MAP: Record<string, number> = {
   english: 1.05,
-  pidgin:  0.95,
-  yoruba:  0.92,
-  igbo:    0.92,
-  hausa:   0.92,
+  pidgin:  1.05,  // was 0.95 – faster feels more natural
+  yoruba:  1.0,
+  igbo:    1.0,
+  hausa:   1.0,
 };
 
-// Languages that benefit from the HD model
-const HD_LANGUAGES = new Set(['pidgin', 'yoruba', 'igbo', 'hausa', 'pcm', 'yo', 'ig', 'ha']);
+// tts-1-hd is ~50% slower to generate; only use it where quality matters most
+// Pidgin removed – tts-1 latency is far better and quality is acceptable
+const HD_LANGUAGES = new Set(['yoruba', 'igbo', 'hausa', 'yo', 'ig', 'ha']);
 
 export class VoiceController {
   /**
