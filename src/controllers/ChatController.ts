@@ -8,7 +8,7 @@ import User from '../models/User.js';
 
 // ─── Constants ────────────────────────────────────────────────
 const FREE_DAILY_LIMIT      = 20;
-const MAX_CONTEXT_MESSAGES  = 10;   // Last N messages sent as AI context (5 turns)
+const MAX_CONTEXT_MESSAGES  = 6;    // Last N messages (3 turns) — keeps token usage low
 const MAX_TITLE_LENGTH      = 60;
 const SSE_HEARTBEAT_MS      = 20_000;
 
@@ -370,7 +370,14 @@ export class ChatController {
     } catch (error) {
       logger.error('streamMessage error:', error);
       if (!clientDisconnected) {
-        send({ type: 'error', message: 'Failed to generate response. Please try again.' });
+        const msg = String((error as any)?.message ?? '');
+        const isRateLimit = msg.includes('rate_limit') || msg.includes('rate-limited') || msg.includes('429');
+        send({
+          type:    'error',
+          message: isRateLimit
+            ? 'AI is temporarily unavailable (rate limit). Please wait a few minutes and try again.'
+            : 'Failed to generate response. Please try again.',
+        });
       }
     } finally {
       clearInterval(heartbeat);

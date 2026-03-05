@@ -2,7 +2,7 @@ import axios from 'axios';
 import { logger } from '../utils/logger.js';
 import { PersonalityProfile } from '../types/index.js';
 import { groqService } from './groqService.js';
-import { groq, MODELS } from '../config/groq.js';
+import { groq, MODELS, GROQ_FALLBACK_MODELS } from '../config/groq.js';
 import { dataScraperService } from './DataScraperService.js';
 import {
   assembleSystemPrompt,
@@ -896,6 +896,29 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
   }
 
   /**
+   * Trim history to fit within an estimated token budget.
+   * Keeps most-recent messages; drops oldest first.
+   * Uses a rough 4 chars-per-token heuristic.
+   */
+  private trimHistory(
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    systemPrompt: string,
+    currentMessage: string,
+    tokenBudget = 1800
+  ): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const est = (t: string) => Math.ceil(t.length / 4);
+    let available = tokenBudget - est(systemPrompt) - est(currentMessage) - 20;
+    const trimmed: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (let i = history.length - 1; i >= 0; i--) {
+      const cost = est(history[i].content) + 6;
+      if (available - cost < 0) break;
+      available -= cost;
+      trimmed.unshift(history[i]);
+    }
+    return trimmed;
+  }
+
+  /**
    * Generate a personality-aware response (non-streaming).
    *
    * @param history  Optional prior conversation turns (oldest → newest).
@@ -933,8 +956,9 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       voiceMode,
       liveDataContext,
     });
-    const messages     = this.buildMessages(systemPrompt, history, message);
-    const maxTokens    = liveDataContext.trim() ? 700 : 400;
+    const trimmedHistory = this.trimHistory(history, systemPrompt, message);
+    const messages       = this.buildMessages(systemPrompt, trimmedHistory, message);
+    const maxTokens      = liveDataContext.trim() ? 600 : 350;
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) {
@@ -973,18 +997,58 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       return content;
     }
 
-    const groqResult = await groqService.generateCompletion({
-      prompt:      message,
-      systemPrompt,
-      model:       MODELS.STANDARD,
-      temperature: 0.8,
-      maxTokens:   maxTokens,
-    });
+    // Try Groq models in fallback order; last resort is OpenAI gpt-4o-mini
+    let groqContent: string | null = null;
+    let lastGroqError: unknown;
 
-    if (!groqResult.content?.trim()) {
-      throw new Error('Empty response from Groq');
+    for (const model of GROQ_FALLBACK_MODELS) {
+      try {
+        const result = await groqService.generateCompletion({
+          prompt:      message,
+          systemPrompt,
+          model,
+          temperature: 0.8,
+          maxTokens:   maxTokens,
+        });
+        if (result.content?.trim()) {
+          groqContent = result.content.trim();
+          break;
+        }
+      } catch (err: any) {
+        const is429 = err?.status === 429 || String(err?.message).includes('rate_limit');
+        if (is429) {
+          logger.warn(`Groq rate limit on ${model}, trying next model...`);
+          lastGroqError = err;
+        } else {
+          throw err;
+        }
+      }
     }
-    return groqResult.content.trim();
+
+    if (groqContent) return groqContent;
+
+    // All Groq models exhausted → OpenAI last resort
+    if (this.openaiApiKey) {
+      logger.warn('All Groq models rate-limited, falling back to OpenAI (text)...');
+      let response;
+      try {
+        response = await axios.post(
+          `${this.openaiBaseUrl}/chat/completions`,
+          { model: this.openaiModel, messages, temperature: 0.8, max_tokens: maxTokens },
+          {
+            timeout: this.openaiTimeout,
+            headers: { Authorization: `Bearer ${this.openaiApiKey}`, 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (error: any) {
+        logger.error('OpenAI last-resort fallback failed', error?.response?.status);
+        throw lastGroqError ?? error;
+      }
+      const fallbackContent = response?.data?.choices?.[0]?.message?.content?.trim();
+      if (fallbackContent) return fallbackContent;
+    }
+
+    throw lastGroqError ?? new Error('All AI providers are currently rate-limited. Please try again in a few minutes.');
   }
 
   /**
@@ -1021,8 +1085,9 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       voiceMode,
       liveDataContext,
     });
-    const messages     = this.buildMessages(systemPrompt, history, message);
-    const maxTokens    = liveDataContext.trim() ? 700 : 400;
+    const trimmedHistory = this.trimHistory(history, systemPrompt, message);
+    const messages       = this.buildMessages(systemPrompt, trimmedHistory, message);
+    const maxTokens      = liveDataContext.trim() ? 600 : 350;
 
     if (this.gbtDefault) {
       if (!this.openaiApiKey) throw new Error('OPENAI_API_KEY is not set');
@@ -1069,19 +1134,85 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       return;
     }
 
-    // Groq streaming path
-    const stream = await groq.chat.completions.create({
-      model:       MODELS.STANDARD,
-      messages,                       // ← history now included
-      temperature: 0.8,
-      max_tokens:  maxTokens,
-      stream:      true,
-    });
+    // Groq streaming path — try each model in fallback order
+    let groqStream: AsyncIterable<any> | null = null;
+    let lastGroqError: unknown;
 
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content as string | null | undefined;
-      if (content) yield content;
+    for (const model of GROQ_FALLBACK_MODELS) {
+      try {
+        groqStream = await groq.chat.completions.create({
+          model,
+          messages,
+          temperature: 0.8,
+          max_tokens:  maxTokens,
+          stream:      true,
+        });
+        logger.info(`Streaming with Groq model: ${model}`);
+        break;
+      } catch (err: any) {
+        const is429 = err?.status === 429 || String(err?.message).includes('rate_limit');
+        if (is429) {
+          logger.warn(`Groq rate limit on ${model}, trying next model...`);
+          lastGroqError = err;
+        } else {
+          throw err;
+        }
+      }
     }
+
+    if (groqStream) {
+      for await (const chunk of groqStream) {
+        const content = chunk.choices[0]?.delta?.content as string | null | undefined;
+        if (content) yield content;
+      }
+      return;
+    }
+
+    // All Groq models exhausted → OpenAI streaming last resort
+    if (this.openaiApiKey) {
+      logger.warn('All Groq models rate-limited, falling back to OpenAI (stream)...');
+      const response = await fetch(`${this.openaiBaseUrl}/chat/completions`, {
+        method:  'POST',
+        headers: {
+          Authorization:  `Bearer ${this.openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model:       this.openaiModel,
+          messages,
+          temperature: 0.8,
+          max_tokens:  maxTokens,
+          stream:      true,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw lastGroqError ?? new Error(`OpenAI fallback failed: ${response.status}`);
+      }
+
+      const reader  = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer    = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+            try {
+              const data    = JSON.parse(line.slice(6));
+              const content = data.choices?.[0]?.delta?.content as string | undefined;
+              if (content) yield content;
+            } catch { /* ignore malformed SSE chunks */ }
+          }
+        }
+      }
+      return;
+    }
+
+    throw lastGroqError ?? new Error('All AI providers are currently rate-limited. Please try again in a few minutes.');
   }
 
   /**

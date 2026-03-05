@@ -17,6 +17,24 @@ export const MODELS = {
   LARGE: 'llama-3.3-70b-versatile'
 } as const;
 
+/**
+ * Groq model fallback chain — tried in order when a model hits its daily
+ * token limit (HTTP 429 / rate_limit_exceeded).
+ *
+ * llama-3.3-70b-versatile  → primary (best quality)
+ * llama-3.1-8b-instant     → fast, separate TPD quota
+ * gemma2-9b-it             → separate quota, good quality
+ * mixtral-8x7b-32768       → larger context, separate quota
+ *
+ * If ALL Groq models are exhausted, PersonalityService falls back to OpenAI.
+ */
+export const GROQ_FALLBACK_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'gemma2-9b-it',
+  'mixtral-8x7b-32768',
+] as const;
+
 // Default generation parameters
 export const DEFAULT_PARAMS = {
   temperature: 0.8,
