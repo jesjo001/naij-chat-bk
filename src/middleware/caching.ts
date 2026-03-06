@@ -41,6 +41,11 @@ export const etagMiddleware = (req: Request, res: Response, next: NextFunction) 
   const originalSend = res.send;
 
   res.send = function (body: any): Response {
+    // Guard: never touch headers on a response that is already on the wire
+    if (res.headersSent) {
+      return originalSend.call(this, body);
+    }
+
     // Generate ETag for response body
     if (body && typeof body === 'string') {
       const etag = generateETag(body);
@@ -66,25 +71,44 @@ export const etagMiddleware = (req: Request, res: Response, next: NextFunction) 
 export const smartCache = (req: Request, res: Response, next: NextFunction) => {
   const path = req.path;
 
-  // No cache for auth and user-specific endpoints
+  // Never cache auth, user-specific, or payment endpoints
   if (path.includes('/auth') || path.includes('/user') || path.includes('/payment')) {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
     return next();
   }
 
-  // Short cache for data endpoints (5 minutes)
-  if (path.includes('/data')) {
-    res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+  // Never cache chat (streaming / user-specific AI responses)
+  if (path.includes('/chat')) {
+    res.setHeader('Cache-Control', 'no-store, private');
     return next();
   }
 
-  // Medium cache for stories and static content (1 hour)
-  if (path.includes('/story') || path.includes('/template')) {
-    res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
+  // Health check — very short cache to reduce DB pings from load balancers
+  if (path === '/health') {
+    res.setHeader('Cache-Control', 'public, max-age=10, s-maxage=10');
     return next();
   }
 
-  // Default: no cache for safety
+  // Exchange rates / live data — 10 min cache with stale fallback
+  if (path.includes('/finance') || path.includes('/data')) {
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60, stale-if-error=3600');
+    return next();
+  }
+
+  // Stories, templates, static content — 1 hour with stale fallback
+  if (path.includes('/story') || path.includes('/template') || path.includes('/personality')) {
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=300, stale-if-error=86400');
+    return next();
+  }
+
+  // Agents / tools — 5 min
+  if (path.includes('/agents') || path.includes('/tools')) {
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+    return next();
+  }
+
+  // Default: conservative no-cache for everything else
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   next();
 };

@@ -12,18 +12,26 @@ export async function initializeRedis(): Promise<RedisClientType | null> {
   }
 
   try {
-    redisClient = createClient({ 
+    redisClient = createClient({
       url: redisUrl,
+      // Disable queuing commands when disconnected — avoids memory buildup
+      disableOfflineQueue: true,
       socket: {
         reconnectStrategy: (retries) => {
-          if (retries > 3) {
-            logger.warn('Redis reconnection attempts exceeded. Running without cache.');
-            return false; // Stop reconnecting
+          if (retries > 5) {
+            logger.warn('Redis: max reconnect attempts reached. Disabling cache.');
+            return false;
           }
-          return Math.min(retries * 100, 3000);
+          return Math.min(retries * 200, 5000); // exponential backoff up to 5s
         },
-        connectTimeout: 5000
-      }
+        connectTimeout: 5000,
+        keepAlive: 30000,      // Send TCP keepalive every 30s
+        noDelay: true,         // Disable Nagle’s algorithm for lower latency
+        tls: redisUrl.startsWith('rediss://'), // Auto-enable TLS for rediss:// URLs
+      },
+
+      // Auto-pipeline read commands for throughput
+      commandsQueueMaxLength: 500,
     });
 
     redisClient.on('error', (error) => {
@@ -58,12 +66,16 @@ export function getRedisClient(): RedisClientType | null {
 
 // Cache TTL configurations (in seconds)
 export const CACHE_TTL = {
-  TEMPLATE: 60 * 60 * 24 * 30, // 30 days
-  SETTING: 60 * 60 * 24 * 7, // 7 days
-  CHARACTER_ARCHETYPE: 60 * 60 * 24 * 7, // 7 days
-  PRODUCTION_NOTES: 60 * 60 * 24 * 30, // 30 days
-  STORY_OUTLINE: 60 * 60, // 1 hour
-  FULL_STORY: 60 * 60 * 24 // 24 hours
+  TEMPLATE: 60 * 60 * 24 * 30,       // 30 days — rarely changes
+  SETTING: 60 * 60 * 24 * 7,         // 7 days
+  CHARACTER_ARCHETYPE: 60 * 60 * 24 * 7,
+  PRODUCTION_NOTES: 60 * 60 * 24 * 30,
+  STORY_OUTLINE: 60 * 60,             // 1 hour
+  FULL_STORY: 60 * 60 * 24,           // 24 hours
+  CHAT_RESPONSE: 60 * 5,              // 5 min — short, AI responses are dynamic
+  USER_PROFILE: 60 * 15,              // 15 min — reduce DB reads
+  EXCHANGE_RATE: 60 * 10,             // 10 min — financial data
+  HEALTH: 30,                         // 30s — health check cache
 };
 
 export async function closeRedis(): Promise<void> {

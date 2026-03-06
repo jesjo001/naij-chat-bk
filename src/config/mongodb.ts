@@ -15,14 +15,31 @@ export async function connectDB() {
 
     // Optimized connection options for speed
     await mongoose.connect(mongoUri, {
-      maxPoolSize: 50, // Maximum connection pool size
-      minPoolSize: 10, // Minimum connection pool size
-      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
-      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
-      family: 4, // Use IPv4, skip trying IPv6
-      maxIdleTimeMS: 10000, // Remove a connection from pool if idle for 10s
-      compressors: ['zlib'], // Enable compression
-      zlibCompressionLevel: 6, // Balanced compression level
+      // Pool — tuned for VPS (not dedicated server — don't go above 20)
+      maxPoolSize: parseInt(process.env.MONGO_POOL_MAX || '20'),
+      minPoolSize: parseInt(process.env.MONGO_POOL_MIN || '5'),
+
+      // Timeouts — fail fast rather than hanging
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 30000,
+      connectTimeoutMS: 10000,
+
+      // Heartbeat — detect stale connections early
+      heartbeatFrequencyMS: 10000,
+
+      // Force IPv4 to avoid IPv6 DNS issues on VPS
+      family: 4,
+
+      // Idle connection cleanup
+      maxIdleTimeMS: 30000,
+
+      // Wire compression — reduces bandwidth to MongoDB Atlas
+      compressors: ['zlib'],
+      zlibCompressionLevel: 4, // Level 4 = fast, good for latency-sensitive ops
+
+      // Retry writes/reads for transient errors
+      retryWrites: true,
+      retryReads: true,
     });
 
     // Enable lean queries by default for better performance

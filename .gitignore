@@ -7,6 +7,8 @@ logs/
 .env
 .env.local
 .env.*.local
+.env.production
+.pm2_startup_done
 *.pem
 *.key
 *.crt

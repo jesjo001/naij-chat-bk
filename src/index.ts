@@ -13,6 +13,7 @@ import { requestLogger, errorHandler } from './middleware/index.js';
 import { smartCache, etagMiddleware } from './middleware/caching.js';
 import apiRoutes from './routes/api.js';
 import dotenv from 'dotenv';
+import http from 'http';
 
 dotenv.config();
 
@@ -20,8 +21,27 @@ const app: Express = express();
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Trust proxy - important for cPanel/VPS deployments
-app.set('trust proxy', 1);
+// Trust proxy - essential for VPS/cPanel behind Nginx
+app.set('trust proxy', process.env.TRUST_PROXY ? parseInt(process.env.TRUST_PROXY) : 1);
+
+// Disable X-Powered-By to avoid fingerprinting
+app.disable('x-powered-by');
+
+// Add X-Response-Time header for performance monitoring.
+// Must wrap res.end — headers cannot be set inside res.on('finish') because
+// the finish event fires after headers have already been flushed to the client.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = process.hrtime.bigint();
+  const originalEnd = res.end.bind(res) as typeof res.end;
+  (res as any).end = (...args: Parameters<typeof res.end>) => {
+    if (!res.headersSent) {
+      const ms = Number(process.hrtime.bigint() - start) / 1e6;
+      res.setHeader('X-Response-Time', `${ms.toFixed(2)}ms`);
+    }
+    return originalEnd(...args);
+  };
+  next();
+});
 
 // Security middleware - Enhanced helmet configuration
 app.use(
@@ -79,9 +99,9 @@ app.use(
   })
 );
 
-// Body parser middleware with strict limits
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// Body parser middleware — 2mb limit is sufficient for chat payloads
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 // Request logging middleware
 app.use(requestLogger);
@@ -90,35 +110,35 @@ app.use(requestLogger);
 app.use(smartCache);
 app.use(etagMiddleware);
 
-// Aggressive rate limiting - Tiered approach
+// Tiered rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per 15 minutes
-  message: 'Too many requests from this IP, please try again later.',
+  max: 200, // 200 requests per 15 min per IP
+  message: { success: false, error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health';
-  },
+  skip: (req) => req.path === '/health',
 });
 
 const strictLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute for sensitive endpoints
-  message: 'Rate limit exceeded for this endpoint.',
+  max: 15, // 15 requests/min for auth endpoints
+  message: { success: false, error: 'Too many auth attempts. Try again in a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30, // 30 chat requests per minute
+  message: { success: false, error: 'Chat rate limit reached. Please wait.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 app.use('/api/', limiter);
-app.use('/api/auth/', strictLimiter); // Stricter for auth endpoints
-
-// Error handler (must be after routes)
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err.stack);
-  res.status(500).send('Something broke!');
-});
+app.use('/api/auth/', strictLimiter);
+app.use('/api/chat/', chatLimiter);
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
@@ -161,12 +181,21 @@ app.use((req: Request, res: Response) => {
   res.status(404).json({
     success: false,
     error: 'Not found',
-    path: req.path
+    path: req.path,
   });
 });
 
-// Error handling middleware
+// Error handling middleware — MUST be last, after all routes
 app.use(errorHandler);
+
+// Unhandled promise rejection safety net
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  process.exit(1);
+});
 
 // Graceful shutdown handler
 const gracefulShutdown = async () => {
@@ -182,18 +211,27 @@ process.on('SIGINT', gracefulShutdown);
 // Start server
 async function startServer() {
   try {
-    // Connect to MongoDB
     await connectDB();
-
-    // Initialize Redis
     await initializeRedis();
 
-    // Start listening
-    app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
-      logger.info(`Health check: http://localhost:${PORT}/health`);
-      logger.info(`API docs: http://localhost:${PORT}/`);
+    const server = http.createServer(app);
+
+    // Keep-alive tuning — critical for VPS behind Nginx
+    server.keepAliveTimeout = 65000;  // Must be > Nginx keepalive_timeout (60s)
+    server.headersTimeout = 66000;    // Must be > keepAliveTimeout
+
+    // Request timeout — kill hanging requests after 30s
+    server.setTimeout(30000, (socket) => {
+      logger.warn('Request timeout — closing socket');
+      socket.destroy();
     });
+
+    server.listen(PORT, () => {
+      logger.info(`🚀 Server running on port ${PORT} in ${NODE_ENV} mode`);
+      logger.info(`❤️  Health check: http://localhost:${PORT}/health`);
+    });
+
+    return server;
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);
