@@ -2,7 +2,7 @@
 I'll build the entire production-ready system with Groq API, template engine, caching, and optimizations.
 
 📦 PROJECT STRUCTURE
-naijagpt-storyteller/
+NaijaGBT-storyteller/
 ├── server/
 │   ├── config/
 │   │   ├── groq.js
@@ -36,7 +36,7 @@ naijagpt-storyteller/
 
 1. PACKAGE.JSON
 json{
-  "name": "naijagpt-storyteller",
+  "name": "NaijaGBT-storyteller",
   "version": "1.0.0",
   "description": "AI-Powered Nigerian Storytelling Platform",
   "main": "server.js",
@@ -72,7 +72,7 @@ NODE_ENV=production
 PORT=5000
 
 # Database
-MONGODB_URI=mongodb://localhost:27017/naijagpt
+MONGODB_URI=mongodb://localhost:27017/NaijaGBT
 REDIS_URL=redis://localhost:6379
 
 # Groq API
@@ -1436,7 +1436,7 @@ module.exports = new StoryGenerationService();
 I'll build the entire production-ready system with Groq API, template engine, caching, and optimizations.
 
 📦 PROJECT STRUCTURE
-naijagpt-storyteller/
+NaijaGBT-storyteller/
 ├── server/
 │   ├── config/
 │   │   ├── groq.js
@@ -1470,7 +1470,7 @@ naijagpt-storyteller/
 
 1. PACKAGE.JSON
 json{
-  "name": "naijagpt-storyteller",
+  "name": "NaijaGBT-storyteller",
   "version": "1.0.0",
   "description": "AI-Powered Nigerian Storytelling Platform",
   "main": "server.js",
@@ -1506,7 +1506,7 @@ NODE_ENV=production
 PORT=5000
 
 # Database
-MONGODB_URI=mongodb://localhost:27017/naijagpt
+MONGODB_URI=mongodb://localhost:27017/NaijaGBT
 REDIS_URL=redis://localhost:6379
 
 # Groq API

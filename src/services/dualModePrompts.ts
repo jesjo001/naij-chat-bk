@@ -122,6 +122,9 @@ export function assembleSystemPrompt(params: {
 
   const parts: string[] = [];
 
+  const CONTEXT_REMINDER = "\n\nIMPORTANT: You have access to the conversation history provided above. Use this context to give personalized, continuity-aware responses. Reference details the user shared earlier in this conversation.";
+  parts.push(CONTEXT_REMINDER);
+
   // Order matters: earlier instructions carry more weight with the model.
   // Language → Format → Persona → Live Data
   const langInstruction = buildLanguageInstruction(language);

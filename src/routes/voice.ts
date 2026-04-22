@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { VoiceController } from '../controllers/VoiceController.js';
-import { authenticateToken } from '../middleware/index.js';
+import { authenticateToken, requireEmailVerification } from '../middleware/index.js';
 
 const router = express.Router();
 const voiceController = new VoiceController();
@@ -34,10 +34,10 @@ const upload = multer({
 });
 
 // POST /api/voice/synthesize - Convert text to speech
-router.post('/synthesize', authenticateToken, (req: Request, res: Response) => voiceController.synthesize(req, res));
+router.post('/synthesize', authenticateToken, requireEmailVerification, (req: Request, res: Response) => voiceController.synthesize(req, res));
 
 // POST /api/voice/transcribe - Convert speech to text (Whisper API)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-router.post('/transcribe', authenticateToken, upload.single('audio') as any, (req: Request, res: Response) => voiceController.transcribe(req, res));
+router.post('/transcribe', authenticateToken, requireEmailVerification, upload.single('audio') as any, (req: Request, res: Response) => voiceController.transcribe(req, res));
 
 export default router;

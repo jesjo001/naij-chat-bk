@@ -53,7 +53,7 @@ export async function connectDB() {
       },
     });
 
-    logger.info(`✅ MongoDB connected: ${mongoUri}`);
+    logger.info(`✅ MongoDB connected`);
   } catch (error) {
     logger.error('❌ MongoDB connection failed:', error);
     process.exit(1);

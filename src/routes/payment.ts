@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { PaymentController } from '../controllers/PaymentController.js';
-import { authenticateToken, asyncHandler } from '../middleware/index.js';
+import { authenticateToken, asyncHandler, requireEmailVerification } from '../middleware/index.js';
 
 const router = express.Router();
 
@@ -12,6 +12,7 @@ const router = express.Router();
 router.post(
   '/initiate',
   authenticateToken,
+  requireEmailVerification,
   asyncHandler(async (req: Request, res: Response, _next: NextFunction) => {
     await (PaymentController.initiatePayment as any)(req, res);
   })
@@ -25,6 +26,7 @@ router.post(
 router.post(
   '/verify',
   authenticateToken,
+  requireEmailVerification,
   asyncHandler(async (req: Request, res: Response, _next: NextFunction) => {
     await (PaymentController.verifyPayment as any)(req, res);
   })
@@ -50,6 +52,7 @@ router.post(
 router.get(
   '/history',
   authenticateToken,
+  requireEmailVerification,
   asyncHandler(async (req: Request, res: Response, _next: NextFunction) => {
     await (PaymentController.getPaymentHistory as any)(req, res);
   })
@@ -63,6 +66,7 @@ router.get(
 router.get(
   '/subscription',
   authenticateToken,
+  requireEmailVerification,
   asyncHandler(async (req: Request, res: Response, _next: NextFunction) => {
     await (PaymentController.getSubscriptionStatus as any)(req, res);
   })
@@ -76,6 +80,7 @@ router.get(
 router.post(
   '/subscription/cancel',
   authenticateToken,
+  requireEmailVerification,
   asyncHandler(async (req: Request, res: Response, _next: NextFunction) => {
     await (PaymentController.cancelSubscription as any)(req, res);
   })

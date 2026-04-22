@@ -236,8 +236,35 @@ interface AuthenticatedRequest extends Request {
   userId?: string;
   email?: string;
   user?: {
+    id: string;
     userId: string;
     email: string;
+  };
+}
+
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+
+  if (secret) {
+    return secret;
+  }
+
+  if ((process.env.NODE_ENV || 'development') !== 'production') {
+    logger.warn('JWT_SECRET is not set. Falling back to a development-only secret.');
+    return 'dev-only-secret-change-me';
+  }
+
+  throw new Error('JWT_SECRET is required in production');
+}
+
+function attachAuthenticatedUser(req: Request, decoded: { userId: string; email: string }) {
+  const authReq = req as AuthenticatedRequest;
+  authReq.userId = decoded.userId;
+  authReq.email = decoded.email;
+  authReq.user = {
+    id: decoded.userId,
+    userId: decoded.userId,
+    email: decoded.email,
   };
 }
 
@@ -258,12 +285,12 @@ interface AuthenticatedRequest extends Request {
         return;
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      const decoded = jwt.verify(token, getJwtSecret()) as {
         userId: string;
         email: string;
       };
 
-      (req as AuthenticatedRequest).user = { userId: decoded.userId, email: decoded.email };
+      attachAuthenticatedUser(req, decoded);
       next();
     } catch (error) {
       logger.error('Token authentication error:', error);
@@ -342,7 +369,6 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction) => 
   try {
     const token = req.headers.authorization?.split(' ')[1];
 
-    console.log('Verifying token:', token);
     if (!token) {
       return res.status(401).json({
         success: false,
@@ -350,14 +376,12 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction) => 
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+    const decoded = jwt.verify(token, getJwtSecret()) as {
       userId: string;
       email: string;
     };
 
-    const authReq = req as AuthenticatedRequest;
-    authReq.userId = decoded.userId;
-    authReq.email = decoded.email;
+    attachAuthenticatedUser(req, decoded);
 
     next();
   } catch (error) {
@@ -424,7 +448,7 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction) =>
     .filter(Boolean);
 
   const authReq = req as AuthenticatedRequest;
-  const email = authReq.email?.toLowerCase();
+  const email = (authReq.email || authReq.user?.email)?.toLowerCase();
 
   if (!email || !adminEmails.includes(email)) {
     return res.status(403).json({

@@ -4,6 +4,7 @@ import Payment from '../models/Payment.js';
 import User from '../models/User.js';
 import { logger } from '../utils/logger.js';
 import { sendPaymentStatusEmail } from '../utils/mailer.js';
+import type { IPayment } from '../models/Payment.js';
 
 const FLUTTERWAVE_SECRET_KEY = process.env.FLUTTERWAVE_SECRET_KEY;
 const FLUTTERWAVE_BASE_URL = 'https://api.flutterwave.com/v3';
@@ -15,7 +16,27 @@ const PRICING_CONFIG = {
   enterprise: { monthly: 50000, yearly: 510000 },
 };
 
-const notifyPaymentStatus = (payment: any, status: 'pending' | 'successful' | 'failed') => {
+type AuthenticatedPaymentRequest = Request & {
+  user?: {
+    id: string;
+    userId: string;
+    email: string;
+  };
+};
+
+type FlutterwaveWebhookPayload = {
+  event?: string;
+  data?: {
+    id?: string | number;
+    status?: string;
+    tx_ref?: string;
+    amount?: number;
+    currency?: string;
+    payment_type?: string;
+  } & Record<string, unknown>;
+};
+
+const notifyPaymentStatus = (payment: IPayment, status: 'pending' | 'successful' | 'failed') => {
   void sendPaymentStatusEmail({
     status,
     transactionRef: payment.transactionRef,
@@ -32,7 +53,7 @@ export class PaymentController {
   /**
    * Initialize payment - create payment record and return transaction reference
    */
-  static async initiatePayment(req: any, res: Response): Promise<Response | void> {
+  static async initiatePayment(req: AuthenticatedPaymentRequest, res: Response): Promise<Response | void> {
     try {
       const { subscriptionTier, subscriptionPeriod = 'monthly' } = req.body;
 
@@ -60,7 +81,7 @@ export class PaymentController {
       ];
 
       // Generate unique transaction reference
-      const transactionRef = `NaijaGBT-${subscriptionTier}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const transactionRef = `NaijaGBT-${subscriptionTier}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
       // Create payment record
       const payment = await Payment.create({
@@ -95,7 +116,7 @@ export class PaymentController {
   /**
    * Verify payment with Flutterwave and update user subscription
    */
-  static async verifyPayment(req: any, res: Response): Promise<Response | void> {
+  static async verifyPayment(req: AuthenticatedPaymentRequest, res: Response): Promise<Response | void> {
     try {
       const { transactionId, transactionRef } = req.body;
 
@@ -114,6 +135,28 @@ export class PaymentController {
       const payment = await Payment.findOne({ transactionRef });
       if (!payment) {
         res.status(404).json({ message: 'Payment record not found' });
+        return;
+      }
+
+      if (req.user && payment.userId.toString() !== req.user.userId) {
+        res.status(403).json({ message: 'Payment record does not belong to the authenticated user' });
+        return;
+      }
+
+      if (payment.status === 'successful') {
+        const user = await User.findById(payment.userId).select(
+          'subscriptionTier subscriptionStatus subscriptionEndDate'
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'Payment already verified',
+          data: {
+            subscriptionTier: user?.subscriptionTier || payment.subscriptionTier,
+            subscriptionStatus: user?.subscriptionStatus || 'active',
+            subscriptionEndDate: user?.subscriptionEndDate,
+          },
+        });
         return;
       }
 
@@ -139,6 +182,19 @@ export class PaymentController {
       }
 
       const txData = verificationData.data;
+
+      if (txData.tx_ref !== payment.transactionRef) {
+        logger.error('Payment reference mismatch', {
+          expected: payment.transactionRef,
+          received: txData.tx_ref,
+          transactionId,
+        });
+        payment.status = 'failed';
+        await payment.save();
+        notifyPaymentStatus(payment, 'failed');
+        res.status(400).json({ message: 'Payment reference mismatch' });
+        return;
+      }
 
       // Verify amount matches
       if (txData.amount !== payment.amount || txData.currency !== payment.currency) {
@@ -226,24 +282,31 @@ export class PaymentController {
       const secretHash = process.env.FLUTTERWAVE_WEBHOOK_SECRET;
       const signature = req.headers['verif-hash'];
 
-      // Verify webhook signature if secret is configured
-      if (secretHash) {
-        if (signature !== secretHash) {
-          logger.warn('Invalid webhook signature', { signature, expected: secretHash });
-          res.status(401).json({ message: 'Unauthorized - Invalid signature' });
-          return;
-        }
-        logger.info('Webhook signature verified');
-      } else {
-        logger.warn('Webhook secret not configured - processing webhook without signature verification');
+      if (!secretHash) {
+        logger.error('FLUTTERWAVE_WEBHOOK_SECRET not configured');
+        res.status(503).json({ message: 'Webhook verification not configured' });
+        return;
       }
 
-      const payload = req.body;
+      if (signature !== secretHash) {
+        logger.warn('Invalid webhook signature', { signature, expected: secretHash });
+        res.status(401).json({ message: 'Unauthorized - Invalid signature' });
+        return;
+      }
+
+      logger.info('Webhook signature verified');
+
+      const payload = req.body as FlutterwaveWebhookPayload;
 
       // Only handle successful charge events
-      if (payload.event === 'charge.completed' && payload.data.status === 'successful') {
+      if (payload.event === 'charge.completed' && payload.data?.status === 'successful') {
         const txRef = payload.data.tx_ref;
         const flutterwaveId = payload.data.id;
+
+        if (!txRef || flutterwaveId === undefined) {
+          res.status(400).json({ message: 'Invalid webhook payload' });
+          return;
+        }
 
         // Find and update payment
         const payment = await Payment.findOne({ transactionRef: txRef });
@@ -255,6 +318,21 @@ export class PaymentController {
 
         // Only update if not already processed
         if (payment.status !== 'successful') {
+          if (payload.data.amount !== payment.amount || payload.data.currency !== payment.currency) {
+            logger.error('Webhook payment amount mismatch', {
+              expected: payment.amount,
+              received: payload.data.amount,
+              currency: payload.data.currency,
+            });
+            payment.status = 'failed';
+            payment.webhookReceived = true;
+            payment.metadata = payload.data;
+            await payment.save();
+            notifyPaymentStatus(payment, 'failed');
+            res.status(400).json({ message: 'Payment amount mismatch' });
+            return;
+          }
+
           payment.status = 'successful';
           payment.flutterwaveId = flutterwaveId.toString();
           payment.webhookReceived = true;
@@ -302,7 +380,7 @@ export class PaymentController {
   /**
    * Get user's payment history
    */
-  static async getPaymentHistory(req: any, res: Response): Promise<Response | void> {
+  static async getPaymentHistory(req: AuthenticatedPaymentRequest, res: Response): Promise<Response | void> {
     try {
       if (!req.user) {
         res.status(401).json({ message: 'Unauthorized' });
@@ -327,7 +405,7 @@ export class PaymentController {
   /**
    * Get user's current subscription status
    */
-  static async getSubscriptionStatus(req: any, res: Response): Promise<Response | void> {
+  static async getSubscriptionStatus(req: AuthenticatedPaymentRequest, res: Response): Promise<Response | void> {
     try {
       if (!req.user) {
         res.status(401).json({ message: 'Unauthorized' });
@@ -369,7 +447,7 @@ export class PaymentController {
   /**
    * Cancel subscription
    */
-  static async cancelSubscription(req: any, res: Response): Promise<Response | void> {
+  static async cancelSubscription(req: AuthenticatedPaymentRequest, res: Response): Promise<Response | void> {
     try {
       if (!req.user) {
         res.status(401).json({ message: 'Unauthorized' });

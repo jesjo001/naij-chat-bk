@@ -10,39 +10,22 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+
+  if (secret) {
+    return secret;
+  }
+
+  if ((process.env.NODE_ENV || 'development') !== 'production') {
+    logger.warn('JWT_SECRET is not set. Falling back to a development-only secret.');
+    return 'dev-only-secret-change-me';
+  }
+
+  throw new Error('JWT_SECRET is required in production');
+}
+
 export class AuthController {
-  private sessions: Map<string, { userId: string; createdAt: number }> =
-    new Map();
-
-  constructor() {
-    // Initialize demo user in database on startup
-    this.initializeDemoUser();
-  }
-
-  /**
-   * Initialize demo user in database
-   */
-  private async initializeDemoUser() {
-    try {
-      const demoEmail = 'demo@example.com';
-      const existingUser = await User.findOne({ email: demoEmail });
-
-      if (!existingUser) {
-        const demoUser = new User({
-          email: demoEmail,
-          password: 'password123',
-          name: 'John Doe',
-          state: 'Lagos',
-          language: 'pidgin',
-        });
-        await demoUser.save();
-        logger.info('✅ Demo user created in MongoDB');
-      }
-    } catch (error) {
-      logger.error('Error initializing demo user:', error);
-    }
-  }
-
   /**
    * POST /api/auth/register
    * Register a new user with MongoDB persistence
@@ -123,7 +106,7 @@ export class AuthController {
       }
 
       // Generate JWT token
-      const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+      const JWT_SECRET = getJwtSecret();
       const token = jwt.sign(
         { userId: newUser._id.toString(), email: newUser.email },
         JWT_SECRET,
@@ -216,18 +199,12 @@ export class AuthController {
       }
 
       // Generate JWT token
-      const JWT_SECRET = process.env.JWT_SECRET!
+      const JWT_SECRET = getJwtSecret();
       const token = jwt.sign(
         { userId: user._id.toString(), email: user.email },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
-
-      // Store session
-      this.sessions.set(token, {
-        userId: user._id.toString(),
-        createdAt: Date.now(),
-      });
 
       logger.info(`✅ User logged in: ${email}`);
 
@@ -268,7 +245,6 @@ export class AuthController {
     try {
       const token = req.headers.authorization?.split(' ')[1];
 
-      console.log('Verifying token:', token);
       if (!token) {
         return res.status(401).json({
           success: false,
@@ -276,7 +252,7 @@ export class AuthController {
         });
       }
 
-      const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+      const JWT_SECRET = getJwtSecret();
       const decoded = jwt.verify(token, JWT_SECRET) as {
         userId: string;
         email: string;
@@ -325,12 +301,6 @@ export class AuthController {
    */
   async logout(req: Request, res: Response) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
-
-      if (token) {
-        this.sessions.delete(token);
-      }
-
       logger.info('✅ User logged out');
 
       res.status(200).json({
@@ -556,7 +526,6 @@ export class AuthController {
         message: 'Verification email sent successfully',
       });
     } catch (error) {
-      console.log('Resend verification error:', error);
       logger.error('Resend verification error:', error);
       res.status(500).json({
         success: false,

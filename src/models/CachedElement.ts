@@ -19,7 +19,6 @@ const CachedElementSchema = new Schema<ICachedElement>(
   { timestamps: true }
 );
 
-CachedElementSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const CachedElement = mongoose.model<ICachedElement>('CachedElement', CachedElementSchema);
 

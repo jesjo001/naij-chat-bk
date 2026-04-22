@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { asyncHandler, authenticateToken } from '../middleware/index.js';
+import { asyncHandler, authenticateToken, requireEmailVerification } from '../middleware/index.js';
 import { AgentController } from '../controllers/AgentController.js';
 
 const router = Router();
@@ -9,7 +9,7 @@ const agentController = new AgentController();
  * GET /api/agents
  * Get all agents for the current user (protected)
  */
-router.get('/', authenticateToken, asyncHandler(agentController.getUserAgents));
+router.get('/', authenticateToken, requireEmailVerification, asyncHandler(agentController.getUserAgents));
 
 /**
  * GET /api/agents/public
@@ -27,19 +27,19 @@ router.get('/:id', asyncHandler(agentController.getAgent));
  * POST /api/agents
  * Create a new agent (protected)
  */
-router.post('/', authenticateToken, asyncHandler(agentController.createAgent));
+router.post('/', authenticateToken, requireEmailVerification, asyncHandler(agentController.createAgent));
 
 /**
  * PATCH /api/agents/:id
  * Update an agent (protected)
  */
-router.patch('/:id', authenticateToken, asyncHandler(agentController.updateAgent));
+router.patch('/:id', authenticateToken, requireEmailVerification, asyncHandler(agentController.updateAgent));
 
 /**
  * DELETE /api/agents/:id
  * Delete an agent (protected)
  */
-router.delete('/:id', authenticateToken, asyncHandler(agentController.deleteAgent));
+router.delete('/:id', authenticateToken, requireEmailVerification, asyncHandler(agentController.deleteAgent));
 
 /**
  * POST /api/agents/:id/usage

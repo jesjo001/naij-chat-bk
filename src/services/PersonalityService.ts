@@ -906,8 +906,10 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
     currentMessage: string,
     tokenBudget = 1800
   ): Array<{ role: 'user' | 'assistant'; content: string }> {
+    logger.info(`trimHistory called with ${history.length} messages, systemPrompt length ${systemPrompt.length}, currentMessage length ${currentMessage.length}`);
     const est = (t: string) => Math.ceil(t.length / 4);
     let available = tokenBudget - est(systemPrompt) - est(currentMessage) - 20;
+    logger.info(`trimHistory: available token budget = ${available}`);
     const trimmed: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     for (let i = history.length - 1; i >= 0; i--) {
       const cost = est(history[i].content) + 6;
@@ -915,6 +917,7 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       available -= cost;
       trimmed.unshift(history[i]);
     }
+    logger.info(`trimHistory: kept ${trimmed.length} messages, available tokens remaining = ${available}`);
     return trimmed;
   }
 
@@ -950,6 +953,8 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       liveDataContext += await this.getLiveNews();
     }
 
+    logger.info(`DEBUG: history content before trimHistory: ${JSON.stringify(history.slice(0, 2))}`);
+
     const systemPrompt = assembleSystemPrompt({
       personalitySystemPrompt: personality.systemPrompt,
       language:                this.normalizeLanguage(language),
@@ -957,6 +962,10 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       liveDataContext,
     });
     const trimmedHistory = this.trimHistory(history, systemPrompt, message);
+    logger.info(`PersonalityService (non-streaming): received ${history.length} messages, trimmed to ${trimmedHistory.length}`);
+    if (trimmedHistory.length > 0) {
+      logger.info(`DEBUG: first history message: ${JSON.stringify(trimmedHistory[0])}`);
+    }
     const messages       = this.buildMessages(systemPrompt, trimmedHistory, message);
     const maxTokens      = liveDataContext.trim() ? 600 : 350;
 
@@ -1085,7 +1094,12 @@ Remember: You're the patient guide who makes tech less intimidating and more exc
       voiceMode,
       liveDataContext,
     });
+    logger.info(`DEBUG stream: history content before trimHistory: ${JSON.stringify(history.slice(0, 2))}`);
     const trimmedHistory = this.trimHistory(history, systemPrompt, message);
+    logger.info(`PersonalityService (streaming): received ${history.length} messages, trimmed to ${trimmedHistory.length}`);
+    if (trimmedHistory.length > 0) {
+      logger.info(`DEBUG stream: first history message: ${JSON.stringify(trimmedHistory[0])}`);
+    }
     const messages       = this.buildMessages(systemPrompt, trimmedHistory, message);
     const maxTokens      = liveDataContext.trim() ? 600 : 350;
 

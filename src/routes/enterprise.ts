@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { EnterpriseController } from '../controllers/EnterpriseController.js';
-import { authenticateToken } from '../middleware/index.js';
+import { authenticateToken, requireAdmin, requireEmailVerification } from '../middleware/index.js';
 
 const router = Router();
 
@@ -13,7 +13,7 @@ router.post('/enterprise-inquiry', (req: Request, res: Response) => {
 });
 
 // Get inquiries (admin only)
-router.get('/enterprise-inquiries', authenticateToken, (req: Request, res: Response) => {
+router.get('/enterprise-inquiries', authenticateToken, requireEmailVerification, requireAdmin, (req: Request, res: Response) => {
   const authReq = req as any;
   EnterpriseController.getInquiries(authReq, res).catch((error) => {
     res.status(500).json({ success: false, error: 'Internal server error' });
@@ -21,7 +21,7 @@ router.get('/enterprise-inquiries', authenticateToken, (req: Request, res: Respo
 });
 
 // Update inquiry status (admin only)
-router.patch('/enterprise-inquiries/:id', authenticateToken, (req: Request, res: Response) => {
+router.patch('/enterprise-inquiries/:id', authenticateToken, requireEmailVerification, requireAdmin, (req: Request, res: Response) => {
   const authReq = req as any;
   EnterpriseController.updateInquiryStatus(authReq, res).catch((error) => {
     res.status(500).json({ success: false, error: 'Internal server error' });
