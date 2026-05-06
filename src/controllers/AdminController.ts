@@ -5,8 +5,33 @@ import CommunityStory from '../models/CommunityStory.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import { logger } from '../utils/logger.js';
+import { sendAdminBroadcastEmail, sendSubscriptionNotificationEmail } from '../utils/mailer.js';
+
+type AudienceFilter = {
+  tiers?: string[];
+  statuses?: string[];
+  onlyVerified?: boolean;
+};
 
 export class AdminController {
+  private buildUserAudienceFilter(payload: AudienceFilter): Record<string, unknown> {
+    const filter: Record<string, unknown> = {};
+
+    if (payload.tiers && Array.isArray(payload.tiers) && payload.tiers.length > 0) {
+      filter.subscriptionTier = { $in: payload.tiers };
+    }
+
+    if (payload.statuses && Array.isArray(payload.statuses) && payload.statuses.length > 0) {
+      filter.subscriptionStatus = { $in: payload.statuses };
+    }
+
+    if (payload.onlyVerified !== false) {
+      filter.emailVerified = true;
+    }
+
+    return filter;
+  }
+
   /**
    * GET /api/admin/analytics
    * Super admin analytics overview
@@ -160,9 +185,17 @@ export class AdminController {
         });
       }
 
+      const updateData: Record<string, unknown> = { role };
+      if (role === 'admin') {
+        updateData.subscriptionTier = 'enterprise';
+        updateData.subscriptionStatus = 'active';
+        updateData.subscriptionStartDate = new Date();
+        updateData.subscriptionEndDate = undefined;
+      }
+
       const user = await User.findByIdAndUpdate(
         id,
-        { role },
+        updateData,
         { new: true }
       ).select('-password');
 
@@ -198,7 +231,7 @@ export class AdminController {
       const { id } = req.params;
       const { subscriptionTier, subscriptionStatus } = req.body;
 
-      const updateData: any = {};
+      const updateData: Record<string, unknown> = {};
       if (subscriptionTier) updateData.subscriptionTier = subscriptionTier;
       if (subscriptionStatus) updateData.subscriptionStatus = subscriptionStatus;
 
@@ -227,6 +260,234 @@ export class AdminController {
       res.status(500).json({
         success: false,
         message: 'Failed to update user subscription',
+      });
+    }
+  }
+
+  /**
+   * POST /api/admin/emails/broadcast
+   * Send email to all users or filtered users
+   */
+  async sendBroadcastEmail(req: Request, res: Response) {
+    try {
+      const {
+        subject,
+        message,
+        ctaUrl,
+        ctaLabel,
+        tiers,
+        statuses,
+        onlyVerified = true,
+        dryRun = false,
+      } = req.body as {
+        subject?: string;
+        message?: string;
+        ctaUrl?: string;
+        ctaLabel?: string;
+        tiers?: string[];
+        statuses?: string[];
+        onlyVerified?: boolean;
+        dryRun?: boolean;
+      };
+
+      if (!subject || !message) {
+        return res.status(400).json({
+          success: false,
+          message: 'subject and message are required',
+        });
+      }
+
+      const filter = this.buildUserAudienceFilter({ tiers, statuses, onlyVerified });
+      const recipients = await User.find(filter)
+        .select('email name subscriptionTier subscriptionStatus')
+        .lean();
+
+      if (dryRun) {
+        return res.json({
+          success: true,
+          message: 'Broadcast dry run completed',
+          data: {
+            totalRecipients: recipients.length,
+            sample: recipients.slice(0, 20).map((u) => ({
+              email: u.email,
+              name: u.name,
+              subscriptionTier: u.subscriptionTier,
+              subscriptionStatus: u.subscriptionStatus,
+            })),
+          },
+        });
+      }
+
+      const failures: Array<{ email: string; reason: string }> = [];
+      const batchSize = 25;
+      let sent = 0;
+
+      for (let i = 0; i < recipients.length; i += batchSize) {
+        const batch = recipients.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((recipient) =>
+            sendAdminBroadcastEmail({
+              to: recipient.email,
+              name: recipient.name,
+              subject,
+              message,
+              ctaUrl,
+              ctaLabel,
+            })
+          )
+        );
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            sent += 1;
+            return;
+          }
+
+          failures.push({
+            email: batch[index].email,
+            reason: result.reason instanceof Error ? result.reason.message : 'Unknown error',
+          });
+        });
+      }
+
+      logger.info('Admin broadcast completed', {
+        recipients: recipients.length,
+        sent,
+        failed: failures.length,
+      });
+
+      res.json({
+        success: true,
+        message: 'Broadcast email job completed',
+        data: {
+          totalRecipients: recipients.length,
+          sent,
+          failed: failures.length,
+          failures: failures.slice(0, 50),
+        },
+      });
+    } catch (error) {
+      logger.error('Error sending broadcast email', { error });
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send broadcast email',
+      });
+    }
+  }
+
+  /**
+   * POST /api/admin/notifications/subscriptions
+   * Send subscription reminder notifications to filtered users
+   */
+  async sendSubscriptionNotifications(req: Request, res: Response) {
+    try {
+      const {
+        subject = 'Your NaijaGPT subscription update',
+        message = 'Please review your subscription to keep your premium access active.',
+        expiringInDays = 7,
+        tiers,
+        statuses = ['active'],
+        onlyVerified = true,
+        dryRun = false,
+      } = req.body as {
+        subject?: string;
+        message?: string;
+        expiringInDays?: number;
+        tiers?: string[];
+        statuses?: string[];
+        onlyVerified?: boolean;
+        dryRun?: boolean;
+      };
+
+      const now = new Date();
+      const expiryWindow = new Date();
+      expiryWindow.setDate(expiryWindow.getDate() + Math.max(1, Number(expiringInDays || 7)));
+
+      const filter = this.buildUserAudienceFilter({ tiers, statuses, onlyVerified });
+      filter.subscriptionTier = {
+        ...(typeof filter.subscriptionTier === 'object' ? (filter.subscriptionTier as Record<string, unknown>) : {}),
+        $ne: 'free',
+      };
+      filter.subscriptionEndDate = {
+        $gte: now,
+        $lte: expiryWindow,
+      };
+
+      const recipients = await User.find(filter)
+        .select('email name subscriptionTier subscriptionEndDate')
+        .lean();
+
+      if (dryRun) {
+        return res.json({
+          success: true,
+          message: 'Subscription notification dry run completed',
+          data: {
+            totalRecipients: recipients.length,
+            expiringInDays: Number(expiringInDays || 7),
+            sample: recipients.slice(0, 20).map((u) => ({
+              email: u.email,
+              name: u.name,
+              subscriptionTier: u.subscriptionTier,
+              subscriptionEndDate: u.subscriptionEndDate,
+            })),
+          },
+        });
+      }
+
+      const failures: Array<{ email: string; reason: string }> = [];
+      const batchSize = 25;
+      let sent = 0;
+
+      for (let i = 0; i < recipients.length; i += batchSize) {
+        const batch = recipients.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((recipient) =>
+            sendSubscriptionNotificationEmail({
+              to: recipient.email,
+              name: recipient.name,
+              subject,
+              message,
+              subscriptionTier: recipient.subscriptionTier,
+              subscriptionEndDate: recipient.subscriptionEndDate,
+            })
+          )
+        );
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            sent += 1;
+            return;
+          }
+
+          failures.push({
+            email: batch[index].email,
+            reason: result.reason instanceof Error ? result.reason.message : 'Unknown error',
+          });
+        });
+      }
+
+      logger.info('Subscription notification job completed', {
+        recipients: recipients.length,
+        sent,
+        failed: failures.length,
+        expiringInDays,
+      });
+
+      res.json({
+        success: true,
+        message: 'Subscription notification job completed',
+        data: {
+          totalRecipients: recipients.length,
+          sent,
+          failed: failures.length,
+          failures: failures.slice(0, 50),
+        },
+      });
+    } catch (error) {
+      logger.error('Error sending subscription notifications', { error });
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send subscription notifications',
       });
     }
   }

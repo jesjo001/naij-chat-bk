@@ -315,22 +315,30 @@ function attachAuthenticatedUser(req: Request, decoded: { userId: string; email:
       enterprise: 3,
     };
 
-    return async (req: Request, res: Response, next: NextFunction) => {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const authReq = req as AuthenticatedRequest;
         if (!authReq.user?.userId) {
-          return res.status(401).json({
+          res.status(401).json({
             success: false,
             message: 'Authentication required',
           });
+          return;
         }
 
         const user = await User.findById(authReq.user.userId);
         if (!user) {
-          return res.status(404).json({
+          res.status(404).json({
             success: false,
             message: 'User not found',
           });
+          return;
+        }
+
+        // Admin users always have access to pro-gated features.
+        if (user.role === 'admin') {
+          next();
+          return;
         }
 
         // Check if subscription has expired
@@ -346,12 +354,13 @@ function attachAuthenticatedUser(req: Request, decoded: { userId: string; email:
         const requiredTierLevel = tierLevels[minTier];
 
         if (userTierLevel < requiredTierLevel) {
-          return res.status(403).json({
+          res.status(403).json({
             success: false,
             message: `This feature requires ${minTier} subscription or higher`,
             currentTier: user.subscriptionTier,
             requiredTier: minTier,
           });
+          return;
         }
 
         next();
@@ -365,15 +374,16 @@ function attachAuthenticatedUser(req: Request, decoded: { userId: string; email:
     };
   };
 
-export const verifyToken = (req: Request, res: Response, next: NextFunction) => {
+export const verifyToken = (req: Request, res: Response, next: NextFunction): void => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
 
     if (!token) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         message: 'No token provided',
       });
+      return;
     }
 
     const decoded = jwt.verify(token, getJwtSecret()) as {
@@ -400,28 +410,30 @@ export const requireEmailVerification = async (
   req: Request,
   res: Response,
   next: NextFunction
-) => {
+): Promise<void> => {
   try {
     const authReq = req as AuthenticatedRequest;
     
     if (!authReq.userId) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         message: 'Authentication required',
       });
+      return;
     }
 
     const user = await User.findById(authReq.userId);
     
     if (!user) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'User not found',
       });
+      return;
     }
 
     if (!user.emailVerified) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         message: 'Email verification required. Please verify your email address before accessing this resource.',
         code: 'EMAIL_NOT_VERIFIED',
@@ -429,6 +441,7 @@ export const requireEmailVerification = async (
           email: user.email,
         },
       });
+      return;
     }
 
     next();
@@ -441,23 +454,47 @@ export const requireEmailVerification = async (
   }
 };
 
-export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const adminEmails = (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
-  const authReq = req as AuthenticatedRequest;
-  const email = (authReq.email || authReq.user?.email)?.toLowerCase();
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const email = (authReq.email || authReq.user?.email)?.toLowerCase();
 
-  if (!email || !adminEmails.includes(email)) {
-    return res.status(403).json({
+    if (authReq.userId) {
+      const user = await User.findById(authReq.userId).select('role email');
+      if (user?.role === 'admin') {
+        next();
+        return;
+      }
+
+      if (user?.email && adminEmails.includes(user.email.toLowerCase())) {
+        next();
+        return;
+      }
+    }
+
+    if (email && adminEmails.includes(email)) {
+      next();
+      return;
+    }
+
+    res.status(403).json({
       success: false,
       message: 'Admin access required',
     });
+    return;
+  } catch (error) {
+    logger.error('Admin authorization error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify admin access',
+    });
+    return;
   }
-
-  next();
 };
 
 export default {

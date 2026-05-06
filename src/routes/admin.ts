@@ -55,4 +55,24 @@ router.patch(
   })
 );
 
+router.post(
+  '/emails/broadcast',
+  verifyToken,
+  requireEmailVerification,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await adminController.sendBroadcastEmail(req, res);
+  })
+);
+
+router.post(
+  '/notifications/subscriptions',
+  verifyToken,
+  requireEmailVerification,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await adminController.sendSubscriptionNotifications(req, res);
+  })
+);
+
 export default router;

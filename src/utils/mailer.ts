@@ -386,6 +386,107 @@ export interface PasswordResetEmailPayload {
   resetUrl: string;
 }
 
+export interface AdminBroadcastEmailPayload {
+  to: string;
+  name?: string;
+  subject: string;
+  message: string;
+  ctaUrl?: string;
+  ctaLabel?: string;
+}
+
+export interface SubscriptionNotificationPayload {
+  to: string;
+  name?: string;
+  subject: string;
+  message: string;
+  subscriptionTier: string;
+  subscriptionEndDate?: Date;
+}
+
+export const sendAdminBroadcastEmail = async (payload: AdminBroadcastEmailPayload) => {
+  const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
+  const greetingName = payload.name || 'there';
+
+  const text = `
+Hello ${greetingName},
+
+${payload.message}
+
+${payload.ctaUrl ? `${payload.ctaLabel || 'Open app'}: ${payload.ctaUrl}` : ''}
+
+Best regards,
+NaijaGPT Team
+  `.trim();
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 620px; margin: 0 auto;">
+      <div style="background: #0f172a; color: #ffffff; padding: 20px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px;">${payload.subject}</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; padding: 24px; background: #ffffff;">
+        <p style="margin: 0 0 16px;">Hello <strong>${greetingName}</strong>,</p>
+        <div style="white-space: pre-wrap; color: #374151;">${payload.message}</div>
+        ${
+          payload.ctaUrl
+            ? `<div style="margin-top: 24px;"><a href="${payload.ctaUrl}" style="display: inline-block; background: #0f766e; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 6px; font-weight: 600;">${payload.ctaLabel || 'Open app'}</a></div>`
+            : ''
+        }
+      </div>
+    </div>
+  `;
+
+  await sendMail({
+    from,
+    to: payload.to,
+    subject: payload.subject,
+    text,
+    html,
+  });
+};
+
+export const sendSubscriptionNotificationEmail = async (payload: SubscriptionNotificationPayload) => {
+  const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
+  const greetingName = payload.name || 'there';
+  const expiryText = payload.subscriptionEndDate
+    ? `Your ${payload.subscriptionTier} subscription expires on ${payload.subscriptionEndDate.toDateString()}.`
+    : `You currently have a ${payload.subscriptionTier} subscription.`;
+
+  const text = `
+Hello ${greetingName},
+
+${payload.message}
+
+${expiryText}
+
+Best regards,
+NaijaGPT Team
+  `.trim();
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 620px; margin: 0 auto;">
+      <div style="background: #1d4ed8; color: #ffffff; padding: 20px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 22px;">${payload.subject}</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; padding: 24px; background: #ffffff;">
+        <p style="margin: 0 0 16px;">Hello <strong>${greetingName}</strong>,</p>
+        <div style="white-space: pre-wrap; color: #374151; margin-bottom: 16px;">${payload.message}</div>
+        <div style="background: #eff6ff; border-left: 4px solid #1d4ed8; padding: 12px; border-radius: 4px; color: #1e3a8a; font-size: 14px;">
+          ${expiryText}
+        </div>
+      </div>
+    </div>
+  `;
+
+  await sendMail({
+    from,
+    to: payload.to,
+    subject: payload.subject,
+    text,
+    html,
+  });
+};
+
 export const sendPasswordResetEmail = async (payload: PasswordResetEmailPayload) => {
   const from = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@naijagbt.ai';
   const subject = 'Reset Your Password - NaijaGPT';
